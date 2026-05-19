@@ -435,14 +435,10 @@ async function initPlayer(videoId, searchQuery) {
   playing = false; cur = 0; tot = 0;
   _ytErrCnt = 0;
 
-  // Bangun URL — enablejsapi=1 wajib, origin biarkan kosong (tidak perlu)
-  let src;
-  if (videoId) {
-    src = `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&controls=0&enablejsapi=1&playsinline=1`;
-  } else if (searchQuery) {
-    const q = encodeURIComponent(searchQuery);
-    src = `https://www.youtube-nocookie.com/embed?listType=search&list=${q}&autoplay=1&controls=0&enablejsapi=1&playsinline=1`;
-  } else { return; }
+  if (!videoId) return;
+
+  // Bangun URL dengan videoId valid dari Invidious
+  const src = `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&controls=0&enablejsapi=1&playsinline=1&origin=${encodeURIComponent(location.origin||'*')}`;
 
   // Inject iframe, subscribe setelah load
   const wrap = $('yt-wrap');
@@ -480,7 +476,7 @@ async function initPlayer(videoId, searchQuery) {
   };
 }
 
-function fallbackPlayer(videoId) { initPlayer(videoId, null); }
+function fallbackPlayer(videoId) { initPlayer(videoId); }
 function setPB(p) {
   $('ico-play').style.display = p ? 'none' : 'block';
   $('ico-pause').style.display = p ? 'block' : 'none';
@@ -563,13 +559,33 @@ async function doSearch(){
   }
 }
 
-// ─── Resolve YouTube videoId via YouTube IFrame search ───
-// Gunakan YT IFrame API dengan listType=search — tidak butuh
-// CORS proxy, tidak butuh API key. YouTube handle search-nya sendiri.
-async function resolveVid(query){
-  // Coba dapatkan videoId dari iframe search dulu via Cloudflare Worker (CORS-safe)
-  // Jika worker tidak support, return null → initPlayer akan pakai listType=search
-  return null; // Langsung pakai searchQuery di initPlayer
+// ─── Resolve YouTube videoId via Invidious API ───────────
+// Invidious adalah frontend YouTube open-source dengan API publik.
+// Tidak perlu API key, tidak perlu CORS proxy, full durasi.
+const INVIDIOUS_INSTANCES = [
+  'https://iv.datura.network',
+  'https://invidious.nerdvpn.de',
+  'https://invidious.privacydev.net',
+  'https://yt.cdaut.de',
+  'https://invidious.fdn.fr',
+];
+
+async function resolveVid(query) {
+  for (const base of INVIDIOUS_INSTANCES) {
+    try {
+      const url = `${base}/api/v1/search?q=${encodeURIComponent(query)}&type=video&fields=videoId,title&page=1`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0 && data[0].videoId) {
+        return data[0].videoId;
+      }
+    } catch(e) {
+      // coba instance berikutnya
+      continue;
+    }
+  }
+  return null; // semua instance gagal
 }
 
 // ─── Load & Play ─────────────────────────────────────────
@@ -586,22 +602,38 @@ async function loadPlay(track) {
   setHeroImg(track); setBarImg(track);
   $('bar-title').textContent = track.title;
   $('bar-artist').textContent = track.artist;
-  $('lyr-lines').innerHTML = '<div class="lyr-empty"><i>⏳</i>Memuat lirik...</div>';
+  $('lyr-lines').innerHTML = '<div class="lyr-empty"><i>⏳</i>Mencari & memuat lagu...</div>';
   setPB(false); updProg();
   renderPL();
 
   // Query untuk YouTube search (judul + artis, bersih)
   const searchQ = track._query + ' official audio';
 
-  // Jalankan initPlayer (via listType=search) & fetchLyrics paralel
+  toast('🔍 Mencari video...');
+
+  // Resolve videoId via Invidious & fetch lyrics paralel
   const cl = cleanT(track.title);
-  const [, lines] = await Promise.all([
-    initPlayer(null, searchQ).catch(e => {
-      console.error('initPlayer error:', e);
-      toast('⚠️ Gagal memuat video');
-    }),
+  const [videoId, lines] = await Promise.all([
+    resolveVid(searchQ),
     fetchLyr(cl, track.artist)
   ]);
+
+  if (videoId) {
+    toast('▶️ Memutar lagu...');
+    await initPlayer(videoId, null).catch(e => {
+      console.error('initPlayer error:', e);
+      toast('⚠️ Gagal memuat video, coba lagu lain');
+    });
+  } else {
+    // Fallback: coba tanpa "official audio"
+    toast('⚠️ Mencoba fallback...');
+    const fallbackId = await resolveVid(track._query);
+    if (fallbackId) {
+      await initPlayer(fallbackId, null).catch(() => toast('⚠️ Gagal memuat video'));
+    } else {
+      toast('❌ Video tidak ditemukan. Coba lagu lain.');
+    }
+  }
 
   lyrs = lines || [];
   $('lyr-lines').innerHTML = lyrs.length
