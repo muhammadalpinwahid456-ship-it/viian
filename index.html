@@ -503,40 +503,43 @@ async function doSearch(){
   }
 }
 
-// ─── Resolve YouTube videoId via Invidious JSON API ──────
-// Invidious: frontend YouTube open-source dengan JSON API,
-// tidak perlu CORS proxy, tidak perlu API key.
+// ─── Resolve YouTube videoId ──────────────────────────────
+// Strategi: Piped API (CORS-friendly, JSON) → allorigins scrape fallback
 async function resolveVid(query){
-  const instances = [
-    'https://iv.datura.network',
-    'https://invidious.privacyredirect.com',
-    'https://invidious.nerdvpn.de',
-    'https://yt.cdaut.de',
-  ];
-  const q = encodeURIComponent(query + ' official audio');
+  const q   = encodeURIComponent(query + ' official audio');
+  const qSh = encodeURIComponent(query + ' audio');
 
-  for(const base of instances){
+  // 1. Piped instances — CORS-friendly JSON API, tanpa API key
+  const piped = [
+    'https://pipedapi.kavin.rocks',
+    'https://pipedapi.adminforge.de',
+    'https://pipedapi.tokhmi.xyz',
+    'https://api.piped.yt',
+  ];
+  for(const base of piped){
     try{
       const ctrl = new AbortController();
-      const timer = setTimeout(()=>ctrl.abort(), 7000);
-      const res = await fetch(
-        `${base}/api/v1/search?q=${q}&type=video&fields=videoId&page=1`,
-        { signal: ctrl.signal }
-      );
+      const timer = setTimeout(()=>ctrl.abort(), 6000);
+      const res = await fetch(`${base}/search?q=${q}&filter=music_songs`, { signal: ctrl.signal });
       clearTimeout(timer);
       if(!res.ok) continue;
       const data = await res.json();
-      if(Array.isArray(data) && data[0]?.videoId) return data[0].videoId;
+      const items = data.items || [];
+      const first = items.find(i => i.url);
+      if(first){
+        const m = first.url.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
+        if(m) return m[1];
+      }
     } catch(e){ continue; }
   }
 
-  // Fallback: allorigins scrape (query lebih pendek, tanpa double-encode)
+  // 2. allorigins scrape — fallback ringan, encode sekali saja
   try{
-    const q2 = encodeURIComponent(query + ' audio');
     const ctrl = new AbortController();
     const timer = setTimeout(()=>ctrl.abort(), 9000);
+    const ytUrl = 'https://www.youtube.com/results?search_query=' + qSh;
     const res = await fetch(
-      `https://api.allorigins.win/get?url=${encodeURIComponent('https://www.youtube.com/results?search_query='+q2)}`,
+      'https://api.allorigins.win/get?url=' + encodeURIComponent(ytUrl),
       { signal: ctrl.signal }
     );
     clearTimeout(timer);
