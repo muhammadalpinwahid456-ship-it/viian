@@ -1227,41 +1227,52 @@ function updatePlayBtn(playing) {
 }
 
 // ============================================================
-//  SEARCH  (YouTube Data API via public proxy)
+//  SEARCH  (powered by Claude AI — no CORS issues)
 // ============================================================
 async function searchYouTube(query) {
-  // Use YouTube oEmbed + search suggestion to find video
-  // We'll use a free YT search API
+  const systemPrompt = `You are a music search engine. When given a search query, return a JSON array of 10 real, well-known YouTube music videos that match the query. Each item must have:
+- videoId: a real YouTube video ID (11 characters, alphanumeric + _ -)
+- title: the song title
+- artist: the artist/channel name
+- duration: duration in seconds (integer)
+
+IMPORTANT: Only include real, popular songs with actual YouTube video IDs you are confident about. Focus on official music videos or well-known uploads. Return ONLY valid JSON array, no markdown, no explanation.
+
+Example format:
+[{"videoId":"dQw4w9WgXcQ","title":"Never Gonna Give You Up","artist":"Rick Astley","duration":213}]`;
+
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 1000,
+      system: systemPrompt,
+      messages: [{ role: "user", content: `Search query: "${query}"` }]
+    })
+  });
+
+  if (!response.ok) throw new Error('Pencarian gagal. Coba lagi.');
+  const data = await response.json();
+  const text = data.content.map(b => b.text || '').join('');
+
+  let results;
   try {
-    const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(query)}&type=video&videoCategoryId=10&maxResults=12&key=AIzaSyD-PLACEHOLDER`;
-    // Fallback: use invidious public API
-    const invUrl = `https://invidious.jing.rocks/api/v1/search?q=${encodeURIComponent(query + ' music')}&type=video&page=1`;
-    const res = await fetch(invUrl);
-    if (!res.ok) throw new Error('API error');
-    const data = await res.json();
-    return data.slice(0, 12).map(v => ({
-      videoId: v.videoId,
-      title: v.title,
-      artist: v.author,
-      thumb: `https://i.ytimg.com/vi/${v.videoId}/mqdefault.jpg`,
-      duration: v.lengthSeconds
-    }));
+    const clean = text.replace(/```json|```/g, '').trim();
+    results = JSON.parse(clean);
   } catch(e) {
-    // Fallback 2: piped
-    try {
-      const res2 = await fetch(`https://pipedapi.kavin.rocks/search?q=${encodeURIComponent(query + ' official music')}&filter=music_songs`);
-      const data2 = await res2.json();
-      return (data2.items || []).slice(0, 12).map(v => ({
-        videoId: v.url ? v.url.replace('/watch?v=', '') : '',
-        title: v.title,
-        artist: v.uploaderName || v.uploader || '',
-        thumb: v.thumbnail,
-        duration: v.duration
-      })).filter(v => v.videoId);
-    } catch(e2) {
-      throw new Error('Pencarian gagal. Coba lagi.');
-    }
+    throw new Error('Pencarian gagal. Coba lagi.');
   }
+
+  if (!Array.isArray(results) || results.length === 0) throw new Error('Tidak ada hasil ditemukan.');
+
+  return results.map(v => ({
+    videoId: v.videoId,
+    title: v.title,
+    artist: v.artist,
+    thumb: `https://i.ytimg.com/vi/${v.videoId}/mqdefault.jpg`,
+    duration: v.duration || 0
+  })).filter(v => v.videoId && v.videoId.length >= 10);
 }
 
 // ============================================================
