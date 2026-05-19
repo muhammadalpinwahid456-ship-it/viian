@@ -387,11 +387,10 @@ async function initPlayer(videoId, searchQuery) {
   YTP = null;
 
   return new Promise((resolve) => {
-    // Build config — JANGAN masukkan videoId ke object jika pakai listType=search
-    // karena YT.Player akan throw "Invalid video id" jika videoId=undefined/null
     const cfg = {
       height: '1', width: '1',
-      playerVars: { autoplay: 1, controls: 0, origin: location.origin },
+      playerVars: { autoplay: 1, controls: 0 },
+      // Catatan: jangan set origin — menyebabkan postMessage mismatch di GitHub Pages
       events: {
         onReady(e) {
           tot = e.target.getDuration();
@@ -406,18 +405,22 @@ async function initPlayer(videoId, searchQuery) {
           else if (e.data === S.ENDED) { playing = false; setPB(false); cancelAnimationFrame(raf); playNext(); }
         },
         onError(e) {
-          console.error('YT error:', e.data);
-          toast('⚠️ Video tidak bisa diputar — coba lagu lain');
-          resolve();
+          // Error 150/101 = video diblokir embed → skip ke video berikutnya di playlist search
+          if (e.data === 150 || e.data === 101) {
+            try { YTP.nextVideo(); } catch(_) {}
+            // Jika masih error setelah skip, resolve saja
+            setTimeout(resolve, 3000);
+          } else {
+            toast('⚠️ Video tidak bisa diputar — coba lagu lain');
+            resolve();
+          }
         }
       }
     };
 
     if (videoId) {
-      // Mode 1: langsung load videoId tertentu
       cfg.videoId = videoId;
     } else if (searchQuery) {
-      // Mode 2: listType=search — YouTube search & putar otomatis, tanpa CORS
       cfg.playerVars.listType = 'search';
       cfg.playerVars.list     = searchQuery;
     }
