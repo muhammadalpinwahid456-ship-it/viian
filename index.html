@@ -364,101 +364,122 @@ let playlist = [];
 try { playlist = JSON.parse(localStorage.getItem('melo3_pl') || '[]'); } catch(e){}
 let photoIdx = null, photoPending = null;
 
-// ─── YouTube Player via iframe + postMessage ─────────────
-// youtube-nocookie.com/embed menerima postMessage dari SEMUA origin
-// (tidak perlu domain terdaftar, tidak ada CORS issue)
-// Kontrol: play, pause, seekTo, setVolume via postMessage JSON
+// ─── YouTube Player via iframe postMessage ───────────────
+// Protocol resmi YouTube iframe JS API via postMessage:
+// 1. Buat iframe dengan enablejsapi=1
+// 2. Setelah iframe load, kirim "listening" event untuk subscribe
+// 3. YouTube kirim onReady, onStateChange, infoDelivery
+// 4. Kontrol via postMessage command
 
-let ytIframe = null;
-let ytReady  = false;
-let _ytSearchQuery = '';
-let _ytErrCount    = 0;
+let ytIframe  = null;
+let _ytErrCnt = 0;
 
+// Kirim command ke iframe YouTube
 function _ytMsg(func, args) {
-  if (!ytIframe) return;
-  ytIframe.contentWindow.postMessage(
-    JSON.stringify({ event: 'command', func, args: args || [] }),
-    '*'   // '*' = kirim ke semua origin → tidak ada mismatch
-  );
+  if (!ytIframe || !ytIframe.contentWindow) return;
+  ytIframe.contentWindow.postMessage(JSON.stringify({
+    event: 'command', func, args: args || []
+  }), '*');
 }
 
-// Dengarkan pesan dari iframe YT
+// Subscribe ke events YouTube (harus dikirim setelah iframe load)
+function _ytListen() {
+  if (!ytIframe || !ytIframe.contentWindow) return;
+  ytIframe.contentWindow.postMessage(JSON.stringify({
+    event: 'listening', id: 1, channel: 'widget'
+  }), '*');
+}
+
+// Dengarkan pesan balik dari iframe YouTube
 window.addEventListener('message', (ev) => {
   let data;
-  try { data = JSON.parse(ev.data); } catch(e) { return; }
-  if (!data || data.channel !== 'widget') return;
+  try { data = (typeof ev.data === 'string') ? JSON.parse(ev.data) : ev.data; }
+  catch(e) { return; }
+  if (!data) return;
 
-  if (data.event === 'onReady') {
-    ytReady = true;
+  // onReady
+  if (data.event === 'onReady' || (data.info && data.info === 'ready')) {
     _ytMsg('setVolume', [parseInt($('vol').value)]);
     _ytMsg('playVideo', []);
   }
+
+  // onStateChange
   if (data.event === 'onStateChange') {
-    const st = data.info;
-    if (st === 1) { // PLAYING
-      playing = true; setPB(true);
-      tot = 0; // akan di-update oleh tick
-      tick();
-    } else if (st === 2 || st === 0) { // PAUSED / ENDED
-      playing = false; setPB(false);
-      cancelAnimationFrame(raf);
-      if (st === 0) playNext();
+    const st = parseInt(data.info);
+    if (st === 1) {        // PLAYING
+      playing = true; setPB(true); tick();
+    } else if (st === 2) { // PAUSED
+      playing = false; setPB(false); cancelAnimationFrame(raf);
+    } else if (st === 0) { // ENDED
+      playing = false; setPB(false); cancelAnimationFrame(raf); playNext();
     }
   }
+
+  // onError — skip video diblokir embed
   if (data.event === 'onError') {
-    const code = data.info;
-    if ((code === 150 || code === 101) && _ytErrCount < 5) {
-      // Video diblokir embed → skip ke video berikutnya dalam playlist search
-      _ytErrCount++;
+    const code = parseInt(data.info);
+    if ((code === 150 || code === 101) && _ytErrCnt < 5) {
+      _ytErrCnt++;
       _ytMsg('nextVideo', []);
     }
   }
-  // Update durasi dari iframe info
+
+  // infoDelivery — currentTime & duration
   if (data.event === 'infoDelivery' && data.info) {
-    if (data.info.duration) tot = data.info.duration;
-    if (data.info.currentTime !== undefined) cur = data.info.currentTime;
+    if (typeof data.info.currentTime === 'number') cur = data.info.currentTime;
+    if (typeof data.info.duration    === 'number' && data.info.duration > 0) tot = data.info.duration;
   }
 });
 
-function _ytGetTime() {
-  // Minta currentTime via postMessage info delivery
-  _ytMsg('getCurrentTime', []);
-}
-
 async function initPlayer(videoId, searchQuery) {
-  ytReady = false; playing = false;
-  _ytErrCount = 0;
-  _ytSearchQuery = searchQuery || '';
+  playing = false; cur = 0; tot = 0;
+  _ytErrCnt = 0;
 
-  // Bangun URL embed
+  // Bangun URL — enablejsapi=1 wajib, origin biarkan kosong (tidak perlu)
   let src;
   if (videoId) {
-    src = `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&controls=0&enablejsapi=1`;
-  } else {
-    const q = encodeURIComponent(searchQuery || '');
-    src = `https://www.youtube-nocookie.com/embed?listType=search&list=${q}&autoplay=1&controls=0&enablejsapi=1`;
-  }
+    src = `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&controls=0&enablejsapi=1&playsinline=1`;
+  } else if (searchQuery) {
+    const q = encodeURIComponent(searchQuery);
+    src = `https://www.youtube-nocookie.com/embed?listType=search&list=${q}&autoplay=1&controls=0&enablejsapi=1&playsinline=1`;
+  } else { return; }
 
-  // Buat/ganti iframe
+  // Inject iframe, subscribe setelah load
   const wrap = $('yt-wrap');
-  wrap.innerHTML = `<iframe id="yt-iframe"
-    src="${src}"
-    width="1" height="1" frameborder="0"
-    allow="autoplay; encrypted-media"
-    allowfullscreen
-    style="position:absolute;width:1px;height:1px"></iframe>`;
-  ytIframe = document.getElementById('yt-iframe');
-  YTP = { // stub agar kode lain (vol, pause, seek) tetap works
-    playVideo:  () => _ytMsg('playVideo',  []),
-    pauseVideo: () => _ytMsg('pauseVideo', []),
-    seekTo:     (t) => _ytMsg('seekTo',    [t, true]),
-    setVolume:  (v) => _ytMsg('setVolume', [v]),
-    getCurrentTime: () => cur,
-    getDuration:    () => tot,
+  wrap.innerHTML = '';
+  const iframe = document.createElement('iframe');
+  iframe.id          = 'yt-iframe';
+  iframe.width       = '1';
+  iframe.height      = '1';
+  iframe.frameBorder = '0';
+  iframe.allow       = 'autoplay; encrypted-media';
+  iframe.style.cssText = 'position:absolute;width:1px;height:1px;opacity:0;pointer-events:none';
+  iframe.src = src;
+
+  // Subscribe setelah iframe selesai load
+  iframe.addEventListener('load', () => {
+    ytIframe = iframe;
+    // Kirim listening untuk aktifkan event callbacks
+    _ytListen();
+    // Beberapa browser/versi butuh sedikit delay sebelum command diterima
+    setTimeout(() => {
+      _ytMsg('setVolume', [parseInt($('vol').value)]);
+      _ytMsg('playVideo', []);
+    }, 800);
+  });
+
+  wrap.appendChild(iframe);
+  ytIframe = iframe; // set awal agar _ytMsg bisa dipakai
+
+  // Stub YTP agar kode lain (vol slider, seek, btn-play) tetap works
+  YTP = {
+    playVideo:  ()  => _ytMsg('playVideo',  []),
+    pauseVideo: ()  => _ytMsg('pauseVideo', []),
+    seekTo:     (t) => _ytMsg('seekTo',     [t, true]),
+    setVolume:  (v) => _ytMsg('setVolume',  [v]),
   };
 }
 
-// fallbackPlayer tidak lagi diperlukan, tapi tetap ada agar tidak error
 function fallbackPlayer(videoId) { initPlayer(videoId, null); }
 function setPB(p) {
   $('ico-play').style.display = p ? 'none' : 'block';
@@ -469,12 +490,13 @@ function tick() {
   cancelAnimationFrame(raf);
   (function loop() {
     if (!playing) return;
-    // cur & tot di-update via postMessage infoDelivery dari iframe
-    _ytMsg('getCurrentTime', []);
+    // Minta update currentTime dari iframe tiap ~250ms (bukan tiap frame)
     updProg(); syncLyr(cur);
     raf = requestAnimationFrame(loop);
   })();
 }
+// Poll currentTime dari iframe tiap 250ms saat playing
+setInterval(() => { if (playing) _ytMsg('getCurrentTime', []); }, 250);
 
 function ft(s){ if(!s||isNaN(s))return'0:00'; return Math.floor(s/60)+':'+String(Math.floor(s%60)).padStart(2,'0'); }
 function updProg(){
