@@ -357,126 +357,99 @@ body::after{
 const WORKER = 'https://fancy-band-d65b.alpinofficial26.workers.dev';
 
 // ─── State ────────────────────────────────────────────────
-let YTP = null, ytApiLoading = false, ytApiReady = false;
+let YTP = null;
 let playing = false, cur = 0, tot = 0, raf = null;
 let lyrCache = {}, lyrs = [], curTrack = null;
 let playlist = [];
 try { playlist = JSON.parse(localStorage.getItem('melo3_pl') || '[]'); } catch(e){}
 let photoIdx = null, photoPending = null;
 
-// ─── YouTube Player via iframe postMessage ───────────────
-// Protocol resmi YouTube iframe JS API via postMessage:
-// 1. Buat iframe dengan enablejsapi=1
-// 2. Setelah iframe load, kirim "listening" event untuk subscribe
-// 3. YouTube kirim onReady, onStateChange, infoDelivery
-// 4. Kontrol via postMessage command
+// ─── YouTube IFrame API Resmi ─────────────────────────────
+// Load YouTube IFrame API script sekali saja
+(function loadYTApi() {
+  if (document.getElementById('yt-api-script')) return;
+  const tag = document.createElement('script');
+  tag.id  = 'yt-api-script';
+  tag.src = 'https://www.youtube.com/iframe_api';
+  document.head.appendChild(tag);
+})();
 
-let ytIframe  = null;
-let _ytErrCnt = 0;
-
-// Kirim command ke iframe YouTube
-function _ytMsg(func, args) {
-  if (!ytIframe || !ytIframe.contentWindow) return;
-  ytIframe.contentWindow.postMessage(JSON.stringify({
-    event: 'command', func, args: args || []
-  }), '*');
-}
-
-// Subscribe ke events YouTube (harus dikirim setelah iframe load)
-function _ytListen() {
-  if (!ytIframe || !ytIframe.contentWindow) return;
-  ytIframe.contentWindow.postMessage(JSON.stringify({
-    event: 'listening', id: 1, channel: 'widget'
-  }), '*');
-}
-
-// Dengarkan pesan balik dari iframe YouTube
-window.addEventListener('message', (ev) => {
-  let data;
-  try { data = (typeof ev.data === 'string') ? JSON.parse(ev.data) : ev.data; }
-  catch(e) { return; }
-  if (!data) return;
-
-  // onReady
-  if (data.event === 'onReady' || (data.info && data.info === 'ready')) {
-    _ytMsg('setVolume', [parseInt($('vol').value)]);
-    _ytMsg('playVideo', []);
+// Callback resmi dari YouTube saat API siap
+window.onYouTubeIframeAPIReady = function() {
+  window._ytApiReady = true;
+  if (window._pendingVideoId) {
+    _createPlayer(window._pendingVideoId);
+    window._pendingVideoId = null;
   }
+};
 
-  // onStateChange
-  if (data.event === 'onStateChange') {
-    const st = parseInt(data.info);
-    if (st === 1) {        // PLAYING
-      playing = true; setPB(true); tick();
-    } else if (st === 2) { // PAUSED
-      playing = false; setPB(false); cancelAnimationFrame(raf);
-    } else if (st === 0) { // ENDED
-      playing = false; setPB(false); cancelAnimationFrame(raf); playNext();
-    }
-  }
+function _createPlayer(videoId) {
+  // Hancurkan player lama jika ada
+  if (YTP) { try { YTP.destroy(); } catch(e){} YTP = null; }
+  $('yt-player').innerHTML = '';
 
-  // onError — skip video diblokir embed
-  if (data.event === 'onError') {
-    const code = parseInt(data.info);
-    if ((code === 150 || code === 101) && _ytErrCnt < 5) {
-      _ytErrCnt++;
-      _ytMsg('nextVideo', []);
-    }
-  }
-
-  // infoDelivery — currentTime & duration
-  if (data.event === 'infoDelivery' && data.info) {
-    if (typeof data.info.currentTime === 'number') cur = data.info.currentTime;
-    if (typeof data.info.duration    === 'number' && data.info.duration > 0) tot = data.info.duration;
-  }
-});
-
-async function initPlayer(videoId, searchQuery) {
-  playing = false; cur = 0; tot = 0;
-  _ytErrCnt = 0;
-
-  if (!videoId) return;
-
-  // Bangun URL dengan videoId valid dari Invidious
-  const src = `https://www.youtube-nocookie.com/embed/${videoId}?autoplay=1&controls=0&enablejsapi=1&playsinline=1&origin=${encodeURIComponent(location.origin||'*')}`;
-
-  // Inject iframe, subscribe setelah load
-  const wrap = $('yt-wrap');
-  wrap.innerHTML = '';
-  const iframe = document.createElement('iframe');
-  iframe.id          = 'yt-iframe';
-  iframe.width       = '1';
-  iframe.height      = '1';
-  iframe.frameBorder = '0';
-  iframe.allow       = 'autoplay; encrypted-media';
-  iframe.style.cssText = 'position:absolute;width:1px;height:1px;opacity:0;pointer-events:none';
-  iframe.src = src;
-
-  // Subscribe setelah iframe selesai load
-  iframe.addEventListener('load', () => {
-    ytIframe = iframe;
-    // Kirim listening untuk aktifkan event callbacks
-    _ytListen();
-    // Beberapa browser/versi butuh sedikit delay sebelum command diterima
-    setTimeout(() => {
-      _ytMsg('setVolume', [parseInt($('vol').value)]);
-      _ytMsg('playVideo', []);
-    }, 800);
+  YTP = new YT.Player('yt-player', {
+    width: '1',
+    height: '1',
+    videoId: videoId,
+    playerVars: {
+      autoplay: 1,
+      controls: 0,
+      playsinline: 1,
+      rel: 0,
+      modestbranding: 1,
+    },
+    events: {
+      onReady: function(e) {
+        e.target.setVolume(parseInt($('vol').value));
+        e.target.playVideo();
+      },
+      onStateChange: function(e) {
+        if (e.data === YT.PlayerState.PLAYING) {
+          playing = true; setPB(true);
+          tot = YTP.getDuration();
+          tick();
+        } else if (e.data === YT.PlayerState.PAUSED) {
+          playing = false; setPB(false);
+          cancelAnimationFrame(raf);
+        } else if (e.data === YT.PlayerState.ENDED) {
+          playing = false; setPB(false);
+          cancelAnimationFrame(raf); playNext();
+        }
+      },
+      onError: function(e) {
+        // 101/150 = video tidak bisa diembed, skip
+        if (e.data === 101 || e.data === 150) {
+          toast('⚠️ Video diblokir, coba lagu lain');
+        }
+      },
+    },
   });
-
-  wrap.appendChild(iframe);
-  ytIframe = iframe; // set awal agar _ytMsg bisa dipakai
-
-  // Stub YTP agar kode lain (vol slider, seek, btn-play) tetap works
-  YTP = {
-    playVideo:  ()  => _ytMsg('playVideo',  []),
-    pauseVideo: ()  => _ytMsg('pauseVideo', []),
-    seekTo:     (t) => _ytMsg('seekTo',     [t, true]),
-    setVolume:  (v) => _ytMsg('setVolume',  [v]),
-  };
 }
 
-function fallbackPlayer(videoId) { initPlayer(videoId); }
+function initPlayer(videoId) {
+  playing = false; cur = 0; tot = 0;
+  cancelAnimationFrame(raf);
+  if (!videoId) return Promise.resolve();
+
+  return new Promise((resolve) => {
+    if (window._ytApiReady && window.YT && window.YT.Player) {
+      _createPlayer(videoId);
+      resolve();
+    } else {
+      // API belum siap, antri
+      window._pendingVideoId = videoId;
+      // Tunggu API ready lalu resolve
+      const check = setInterval(() => {
+        if (window._ytApiReady) {
+          clearInterval(check);
+          resolve();
+        }
+      }, 100);
+    }
+  });
+}
+
 function setPB(p) {
   $('ico-play').style.display = p ? 'none' : 'block';
   $('ico-pause').style.display = p ? 'block' : 'none';
@@ -485,14 +458,15 @@ function setPB(p) {
 function tick() {
   cancelAnimationFrame(raf);
   (function loop() {
-    if (!playing) return;
-    // Minta update currentTime dari iframe tiap ~250ms (bukan tiap frame)
+    if (!playing || !YTP) return;
+    try {
+      cur = YTP.getCurrentTime() || cur;
+      tot = YTP.getDuration()    || tot;
+    } catch(e) {}
     updProg(); syncLyr(cur);
     raf = requestAnimationFrame(loop);
   })();
 }
-// Poll currentTime dari iframe tiap 250ms saat playing
-setInterval(() => { if (playing) _ytMsg('getCurrentTime', []); }, 250);
 
 function ft(s){ if(!s||isNaN(s))return'0:00'; return Math.floor(s/60)+':'+String(Math.floor(s%60)).padStart(2,'0'); }
 function updProg(){
@@ -605,7 +579,7 @@ async function loadPlay(track) {
 
   if (videoId) {
     toast('▶️ Memutar lagu...');
-    await initPlayer(videoId, null).catch(e => {
+    await initPlayer(videoId).catch(e => {
       console.error('initPlayer error:', e);
       toast('⚠️ Gagal memuat video, coba lagu lain');
     });
@@ -614,7 +588,7 @@ async function loadPlay(track) {
     toast('⚠️ Mencoba fallback...');
     const fallbackId = await resolveVid(track._query);
     if (fallbackId) {
-      await initPlayer(fallbackId, null).catch(() => toast('⚠️ Gagal memuat video'));
+      await initPlayer(fallbackId).catch(() => toast('⚠️ Gagal memuat video'));
     } else {
       toast('❌ Video tidak ditemukan. Coba lagu lain.');
     }
@@ -786,7 +760,10 @@ $('ph-save').addEventListener('click',()=>{
 // ─── Control events ───────────────────────────────────────
 $('btn-search').addEventListener('click',doSearch);
 $('q').addEventListener('keydown',e=>{ if(e.key==='Enter') doSearch(); });
-$('btn-play').addEventListener('click',()=>{ if(!curTrack)return; playing?YTP.pauseVideo():YTP.playVideo(); });
+$('btn-play').addEventListener('click',()=>{
+  if(!curTrack||!YTP) return;
+  try { playing ? YTP.pauseVideo() : YTP.playVideo(); } catch(e){}
+});
 $('btn-next').addEventListener('click',playNext);
 $('btn-prev').addEventListener('click',playPrev);
 $('prog-track').addEventListener('click',e=>{
