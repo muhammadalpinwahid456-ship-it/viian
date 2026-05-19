@@ -1139,349 +1139,650 @@
 
 <script>
 // ============================================================
-//  STATE
+//  MELODIFY PLAYER — arsitektur dari chat-notes.js
 // ============================================================
-const CLOUDFLARE_WORKER = 'https://delicate-boat-b40d.alpinwahid516.workers.dev';
-const YOUTUBE_SEARCH_WORKER = 'https://api.allorigins.win/get?url=';
 
-let ytPlayer = null;
-let ytReady = false;
-let isPlaying = false;
-let currentTime = 0;
-let duration = 0;
-let animId = null;
-let lyricsCache = {};
-let lyrics = [];
-let currentTrack = null; // { videoId, title, artist, thumb, photo? }
-let playlist = JSON.parse(localStorage.getItem('melodify_playlist') || '[]');
-let photoTarget = null; // track index for photo upload
-let pendingPhotoDataUrl = null;
+class MelodifyPlayer {
+  constructor() {
+    this.WORKER_URL = 'https://delicate-boat-b40d.alpinwahid516.workers.dev';
+    this.youtubePlayer = null;
+    this.ytApiLoading  = false;
+    this.ytReady       = false;
+    this.isPlaying     = false;
+    this.currentTime   = 0;
+    this.duration      = 0;
+    this.animId        = null;
+    this.lyrics        = [];
+    this._lyricsCache  = {};
+    this.currentTrack  = null;
+    this.playlist      = JSON.parse(localStorage.getItem('melodify_playlist') || '[]');
+    this.photoTarget   = null;
+    this.pendingPhoto  = null;
+  }
 
-// ============================================================
-//  YT API Ready
-// ============================================================
-window.onYouTubeIframeAPIReady = function() {
-  ytReady = true;
-  ytPlayer = new YT.Player('yt-player', {
-    height: '1', width: '1',
-    playerVars: { autoplay: 0, controls: 0, origin: location.origin },
-    events: {
-      onReady: () => {},
-      onStateChange: onPlayerStateChange,
-      onError: (e) => { showToast('❌ Video tidak dapat diputar'); }
+  // ----------------------------------------------------------
+  //  HELPERS
+  // ----------------------------------------------------------
+  esc(s) {
+    if (!s) return '';
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  fmt(s) {
+    if (!s || isNaN(s)) return '0:00';
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    return `${m}:${String(sec).padStart(2,'0')}`;
+  }
+
+  toast(msg, dur = 2500) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), dur);
+  }
+
+  // ----------------------------------------------------------
+  //  YOUTUBE IFRAME API — dari chat-notes.js: loadYouTubeAPI()
+  // ----------------------------------------------------------
+  loadYouTubeAPI() {
+    return new Promise((resolve) => {
+      if (window.YT && window.YT.Player) { resolve(); return; }
+      if (this.ytApiLoading) {
+        const chk = setInterval(() => {
+          if (window.YT && window.YT.Player) { clearInterval(chk); resolve(); }
+        }, 100);
+        return;
+      }
+      this.ytApiLoading = true;
+      window.onYouTubeIframeAPIReady = () => { this.ytApiLoading = false; this.ytReady = true; resolve(); };
+    });
+  }
+
+  // initPlayer — dari chat-notes.js: initPlayer(videoId)
+  async initPlayer(videoId) {
+    await this.loadYouTubeAPI();
+
+    return new Promise((resolve) => {
+      if (this.youtubePlayer && this.ytReady) {
+        // Player sudah ada — langsung load video baru
+        try {
+          this.youtubePlayer.loadVideoById(videoId);
+          this.youtubePlayer.playVideo();
+        } catch(e) {}
+        resolve();
+        return;
+      }
+      this.youtubePlayer = new YT.Player('yt-player', {
+        height: '1', width: '1', videoId,
+        playerVars: { autoplay: 1, controls: 0, origin: location.origin },
+        events: {
+          onReady: (e) => {
+            this.ytReady = true;
+            this.duration = e.target.getDuration();
+            this._updateTimeUI();
+            e.target.playVideo();
+            resolve();
+          },
+          onStateChange: (e) => this._onStateChange(e),
+          onError: () => { this.toast('❌ Video tidak dapat diputar'); resolve(); }
+        }
+      });
+    });
+  }
+
+  _onStateChange(e) {
+    if (e.data === YT.PlayerState.PLAYING) {
+      this.isPlaying = true;
+      this.duration  = this.youtubePlayer.getDuration();
+      this._updatePlayBtn(true);
+      this._tick();
+    } else if (e.data === YT.PlayerState.PAUSED) {
+      this.isPlaying = false;
+      this._updatePlayBtn(false);
+      cancelAnimationFrame(this.animId);
+    } else if (e.data === YT.PlayerState.ENDED) {
+      this.isPlaying = false;
+      this._updatePlayBtn(false);
+      cancelAnimationFrame(this.animId);
+      this.playNext();
     }
-  });
-};
-
-function onPlayerStateChange(e) {
-  if (e.data === YT.PlayerState.PLAYING) {
-    isPlaying = true;
-    updatePlayBtn(true);
-    duration = ytPlayer.getDuration();
-    updateTimeUI();
-    startTick();
-  } else if (e.data === YT.PlayerState.PAUSED) {
-    isPlaying = false;
-    updatePlayBtn(false);
-    cancelAnimationFrame(animId);
-  } else if (e.data === YT.PlayerState.ENDED) {
-    isPlaying = false;
-    updatePlayBtn(false);
-    cancelAnimationFrame(animId);
-    playNext();
   }
-}
 
-function startTick() {
-  cancelAnimationFrame(animId);
-  function tick() {
-    if (!isPlaying || !ytPlayer) return;
+  // _tick — dari chat-notes.js: _tick()
+  _tick() {
+    cancelAnimationFrame(this.animId);
+    const tick = () => {
+      if (!this.isPlaying || !this.youtubePlayer) return;
+      try {
+        this.currentTime = this.youtubePlayer.getCurrentTime() || 0;
+        this.duration    = this.youtubePlayer.getDuration()    || 0;
+      } catch(e) { return; }
+      this._updateTimeUI();
+      this._renderLyrics(this.currentTime);
+      this.animId = requestAnimationFrame(tick);
+    };
+    this.animId = requestAnimationFrame(tick);
+  }
+
+  _updateTimeUI() {
+    document.getElementById('time-current').textContent = this.fmt(this.currentTime);
+    document.getElementById('time-total').textContent   = this.fmt(this.duration);
+    const pct = this.duration ? (this.currentTime / this.duration) * 100 : 0;
+    document.getElementById('progress-fill').style.width = pct + '%';
+  }
+
+  _updatePlayBtn(playing) {
+    document.getElementById('play-icon').style.display  = playing ? 'none'  : 'block';
+    document.getElementById('pause-icon').style.display = playing ? 'block' : 'none';
+  }
+
+  togglePlay() {
+    if (!this.youtubePlayer) return;
+    if (this.isPlaying) this.youtubePlayer.pauseVideo();
+    else                this.youtubePlayer.playVideo();
+  }
+
+  // ----------------------------------------------------------
+  //  LYRICS — dari chat-notes.js: fetchLyrics / parseSyncedLyrics / parsePlainLyrics / renderLyrics
+  // ----------------------------------------------------------
+  async fetchLyrics(title, artist) {
+    const key = title + '|' + artist;
+    if (this._lyricsCache[key] !== undefined) return this._lyricsCache[key];
     try {
-      currentTime = ytPlayer.getCurrentTime() || 0;
-      duration = ytPlayer.getDuration() || 0;
-    } catch(e) { return; }
-    updateTimeUI();
-    renderLyricsLine(currentTime);
-    animId = requestAnimationFrame(tick);
-  }
-  animId = requestAnimationFrame(tick);
-}
-
-function formatTime(s) {
-  if (!s || isNaN(s)) return '0:00';
-  const m = Math.floor(s / 60);
-  const sec = Math.floor(s % 60);
-  return `${m}:${String(sec).padStart(2,'0')}`;
-}
-
-function updateTimeUI() {
-  document.getElementById('time-current').textContent = formatTime(currentTime);
-  document.getElementById('time-total').textContent = formatTime(duration);
-  const pct = duration ? (currentTime / duration) * 100 : 0;
-  document.getElementById('progress-fill').style.width = pct + '%';
-}
-
-function updatePlayBtn(playing) {
-  document.getElementById('play-icon').style.display = playing ? 'none' : 'block';
-  document.getElementById('pause-icon').style.display = playing ? 'block' : 'none';
-}
-
-// ============================================================
-//  SEARCH  (powered by Claude AI — no CORS issues)
-// ============================================================
-async function searchYouTube(query) {
-  const systemPrompt = `You are a music search engine. When given a search query, return a JSON array of 10 real, well-known YouTube music videos that match the query. Each item must have:
-- videoId: a real YouTube video ID (11 characters, alphanumeric + _ -)
-- title: the song title
-- artist: the artist/channel name
-- duration: duration in seconds (integer)
-
-IMPORTANT: Only include real, popular songs with actual YouTube video IDs you are confident about. Focus on official music videos or well-known uploads. Return ONLY valid JSON array, no markdown, no explanation.
-
-Example format:
-[{"videoId":"dQw4w9WgXcQ","title":"Never Gonna Give You Up","artist":"Rick Astley","duration":213}]`;
-
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 1000,
-      system: systemPrompt,
-      messages: [{ role: "user", content: `Search query: "${query}"` }]
-    })
-  });
-
-  if (!response.ok) throw new Error('Pencarian gagal. Coba lagi.');
-  const data = await response.json();
-  const text = data.content.map(b => b.text || '').join('');
-
-  let results;
-  try {
-    const clean = text.replace(/```json|```/g, '').trim();
-    results = JSON.parse(clean);
-  } catch(e) {
-    throw new Error('Pencarian gagal. Coba lagi.');
+      const res = await fetch(
+        `${this.WORKER_URL}/?artist=${encodeURIComponent(artist)}&title=${encodeURIComponent(title)}`
+      );
+      if (!res.ok) { this._lyricsCache[key] = []; return []; }
+      const results = await res.json();
+      if (!results || !results.length) { this._lyricsCache[key] = []; return []; }
+      const chosen = results.find(r => r.syncedLyrics) || results.find(r => r.plainLyrics) || results[0];
+      let parsed = [];
+      if (chosen.syncedLyrics) parsed = this._parseSynced(chosen.syncedLyrics);
+      else if (chosen.plainLyrics) parsed = this._parsePlain(chosen.plainLyrics);
+      this._lyricsCache[key] = parsed;
+      return parsed;
+    } catch(e) {
+      this._lyricsCache[key] = [];
+      return [];
+    }
   }
 
-  if (!Array.isArray(results) || results.length === 0) throw new Error('Tidak ada hasil ditemukan.');
-
-  return results.map(v => ({
-    videoId: v.videoId,
-    title: v.title,
-    artist: v.artist,
-    thumb: `https://i.ytimg.com/vi/${v.videoId}/mqdefault.jpg`,
-    duration: v.duration || 0
-  })).filter(v => v.videoId && v.videoId.length >= 10);
-}
-
-// ============================================================
-//  LYRICS
-// ============================================================
-async function fetchLyrics(title, artist) {
-  const key = title + '|' + artist;
-  if (lyricsCache[key] !== undefined) return lyricsCache[key];
-  try {
-    const res = await fetch(`${CLOUDFLARE_WORKER}/?artist=${encodeURIComponent(artist)}&title=${encodeURIComponent(title)}`);
-    if (!res.ok) { lyricsCache[key] = []; return []; }
-    const results = await res.json();
-    if (!results || !results.length) { lyricsCache[key] = []; return []; }
-    const chosen = results.find(r => r.syncedLyrics) || results.find(r => r.plainLyrics) || results[0];
-    let parsed = [];
-    if (chosen.syncedLyrics) parsed = parseSynced(chosen.syncedLyrics);
-    else if (chosen.plainLyrics) parsed = parsePlain(chosen.plainLyrics);
-    lyricsCache[key] = parsed;
-    return parsed;
-  } catch(e) {
-    lyricsCache[key] = [];
-    return [];
+  _parseSynced(raw) {
+    return raw.split('\n').map(l => {
+      const m = l.match(/\[(\d+):(\d+\.?\d*)\](.*)/);
+      if (m) return { time: parseInt(m[1])*60 + parseFloat(m[2]), text: m[3].trim() };
+      return null;
+    }).filter(Boolean).filter(l => l.text);
   }
-}
 
-function parseSynced(raw) {
-  return raw.split('\n').map(l => {
-    const m = l.match(/\[(\d+):(\d+\.?\d*)\](.*)/);
-    if (m) return { time: parseInt(m[1])*60 + parseFloat(m[2]), text: m[3].trim() };
-    return null;
-  }).filter(Boolean).filter(l => l.text);
-}
-
-function parsePlain(raw) {
-  let t = 0;
-  return raw.split('\n').filter(l => l.trim()).map(text => {
-    const entry = { time: t, text: text.trim() };
-    t += Math.min(5, Math.max(2, text.length / 12));
-    return entry;
-  });
-}
-
-function renderLyricsLine(ct) {
-  const container = document.getElementById('lyrics-container');
-  if (!container || lyrics.length === 0) return;
-  let idx = 0;
-  for (let i = 0; i < lyrics.length; i++) {
-    if (ct >= lyrics[i].time) idx = i; else break;
-  }
-  container.innerHTML = '';
-  lyrics.forEach((line, i) => {
-    const el = document.createElement('div');
-    const cls = i === idx ? 'active' : i < idx ? 'past' : 'upcoming';
-    el.className = 'lyrics-line ' + cls;
-    el.textContent = line.text;
-    el.addEventListener('click', () => {
-      if (ytPlayer) ytPlayer.seekTo(line.time, true);
+  _parsePlain(raw) {
+    let t = 0;
+    return raw.split('\n').filter(l => l.trim()).map(text => {
+      const entry = { time: t, text: text.trim() };
+      t += Math.min(5, Math.max(2, text.length / 12));
+      return entry;
     });
-    container.appendChild(el);
-  });
-  const active = container.querySelectorAll('.lyrics-line')[idx];
-  if (active) {
-    const mid = container.offsetHeight / 2;
-    container.scrollTo({ top: active.offsetTop - mid + active.offsetHeight / 2, behavior: 'smooth' });
-  }
-}
-
-// ============================================================
-//  PLAY TRACK
-// ============================================================
-async function playTrack(track, fromPlaylist = false) {
-  currentTrack = track;
-  isPlaying = false;
-  lyrics = [];
-  currentTime = 0;
-
-  // Update now-playing UI
-  updateNowPlayingUI(track);
-
-  // Update player bar
-  document.getElementById('player-title').textContent = track.title;
-  document.getElementById('player-artist').textContent = track.artist;
-  updatePlayerThumb(track);
-
-  // Update lyrics panel placeholder
-  document.getElementById('lyrics-container').innerHTML = '<div class="lyrics-empty"><span>⏳</span>Memuat lirik...</div>';
-
-  // Mark playlist as playing
-  renderPlaylist();
-
-  // Load YT
-  if (ytPlayer && ytReady) {
-    ytPlayer.loadVideoById(track.videoId);
-    ytPlayer.playVideo();
   }
 
-  // Fetch lyrics
-  const title = cleanTitle(track.title);
-  const artist = track.artist.replace(/VEVO|Official|Music/gi, '').trim();
-  const fetched = await fetchLyrics(title, artist);
-  lyrics = fetched;
-
-  if (lyrics.length === 0) {
-    document.getElementById('lyrics-container').innerHTML = '<div class="lyrics-empty"><span>😔</span>Lirik tidak tersedia untuk lagu ini</div>';
-  } else {
-    renderLyricsLine(0);
-  }
-
-  // Show now playing section
-  document.getElementById('now-playing-section').style.display = 'block';
-}
-
-function cleanTitle(title) {
-  return title
-    .replace(/\(Official.*?\)/gi, '')
-    .replace(/\[Official.*?\]/gi, '')
-    .replace(/Official Music Video/gi, '')
-    .replace(/Official Video/gi, '')
-    .replace(/Music Video/gi, '')
-    .replace(/Lyrics/gi, '')
-    .replace(/\(.*?ft\..*?\)/gi, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function updateNowPlayingUI(track) {
-  document.getElementById('np-title').textContent = track.title;
-  document.getElementById('np-artist').textContent = track.artist;
-  const npThumb = document.getElementById('np-thumb');
-  const photo = track.photo;
-  if (photo || track.thumb) {
-    npThumb.outerHTML = `<img class="np-cover" id="np-thumb" src="${photo || track.thumb}" onerror="this.style.display='none'" alt="">`;
-  }
-}
-
-function updatePlayerThumb(track) {
-  const el = document.getElementById('player-thumb');
-  const photo = track.photo;
-  if (photo || track.thumb) {
-    el.outerHTML = `<img class="player-thumb" id="player-thumb" src="${photo || track.thumb}" onerror="this.style.display='none'" alt="">`;
-  }
-}
-
-// ============================================================
-//  PLAYLIST MANAGEMENT
-// ============================================================
-function savePlaylist() {
-  localStorage.setItem('melodify_playlist', JSON.stringify(playlist));
-}
-
-function addToPlaylist(track) {
-  const exists = playlist.find(t => t.videoId === track.videoId);
-  if (exists) { showToast('⚠️ Lagu sudah ada di playlist'); return; }
-  playlist.push({ ...track });
-  savePlaylist();
-  renderPlaylist();
-  showToast('✅ Ditambahkan ke playlist');
-}
-
-function removeFromPlaylist(idx) {
-  playlist.splice(idx, 1);
-  savePlaylist();
-  renderPlaylist();
-  showToast('🗑️ Dihapus dari playlist');
-}
-
-function renderPlaylist() {
-  const container = document.getElementById('playlist-container');
-  if (playlist.length === 0) {
-    container.innerHTML = '<div class="empty-state" style="padding:30px 10px;"><span>🎵</span><p style="font-size:0.78rem;">Cari lagu dan tambahkan ke playlist</p></div>';
-    return;
-  }
-  container.innerHTML = '';
-  playlist.forEach((track, i) => {
-    const isActive = currentTrack && currentTrack.videoId === track.videoId;
-    const div = document.createElement('div');
-    div.className = 'playlist-item' + (isActive ? ' playing' : '');
-    div.innerHTML = `
-      ${track.photo ? `<img class="playlist-thumb" src="${track.photo}" onerror="this.style.display='none'" alt="">` :
-        track.thumb ? `<img class="playlist-thumb" src="${track.thumb}" onerror="this.style.display='none'" alt="">` :
-        `<div class="playlist-thumb-placeholder">🎵</div>`}
-      <div class="playlist-info">
-        <div class="playlist-title">${escHtml(track.title)}</div>
-        <div class="playlist-artist">${escHtml(track.artist)}</div>
-      </div>
-      <div class="playing-bars"><span></span><span></span><span></span></div>
-      <button class="add-photo-btn" title="Tambah foto" onclick="openPhotoModal(${i}, event)">🖼️</button>
-      <button class="remove-btn" title="Hapus" onclick="removeFromPlaylist(${i}, event)">✕</button>
-    `;
-    div.addEventListener('click', (e) => {
-      if (e.target.classList.contains('remove-btn') || e.target.classList.contains('add-photo-btn')) return;
-      playTrack(playlist[i], true);
+  // renderLyrics — dari chat-notes.js: renderLyrics(currentTime)
+  _renderLyrics(ct) {
+    const container = document.getElementById('lyrics-container');
+    if (!container || this.lyrics.length === 0) return;
+    let idx = 0;
+    for (let i = 0; i < this.lyrics.length; i++) {
+      if (ct >= this.lyrics[i].time) idx = i; else break;
+    }
+    container.innerHTML = '';
+    this.lyrics.forEach((line, i) => {
+      const el = document.createElement('div');
+      el.className = 'lyrics-line ' + (i === idx ? 'active' : i < idx ? 'past' : 'upcoming');
+      el.textContent = line.text;
+      el.addEventListener('click', () => {
+        if (this.youtubePlayer) this.youtubePlayer.seekTo(line.time, true);
+      });
+      container.appendChild(el);
     });
-    container.appendChild(div);
+    // Scroll baris aktif ke tengah — dari chat-notes.js
+    const active = container.querySelectorAll('.lyrics-line')[idx];
+    if (active) {
+      const mid = container.offsetHeight / 2;
+      container.scrollTo({ top: active.offsetTop - mid + active.offsetHeight / 2, behavior: 'smooth' });
+    }
+  }
+
+  // ----------------------------------------------------------
+  //  PLAY TRACK
+  // ----------------------------------------------------------
+  async playTrack(track) {
+    this.currentTrack = track;
+    this.isPlaying    = false;
+    this.lyrics       = [];
+    this.currentTime  = 0;
+    cancelAnimationFrame(this.animId);
+
+    // Update UI
+    this._updateNowPlayingUI(track);
+    document.getElementById('player-title').textContent = track.title;
+    document.getElementById('player-artist').textContent = track.artist;
+    this._updatePlayerThumb(track);
+    document.getElementById('lyrics-container').innerHTML =
+      '<div class="lyrics-empty"><span>⏳</span>Memuat lirik...</div>';
+    document.getElementById('now-playing-section').style.display = 'block';
+    this.renderPlaylist();
+
+    // Init / load player — dari chat-notes.js: initPlayer
+    await this.initPlayer(track.videoId);
+
+    // Fetch lirik paralel — dari chat-notes.js: fetchLyrics
+    const cleanTitle  = track.title
+      .replace(/\(Official.*?\)/gi,'').replace(/\[Official.*?\]/gi,'')
+      .replace(/Official (Music )?Video/gi,'').replace(/Music Video/gi,'')
+      .replace(/Lyrics/gi,'').replace(/\(.*?ft\..*?\)/gi,'').replace(/\s+/g,' ').trim();
+    const cleanArtist = track.artist.replace(/VEVO|Official|Music/gi,'').trim();
+
+    const fetched = await this.fetchLyrics(cleanTitle, cleanArtist);
+    this.lyrics = fetched;
+    if (this.lyrics.length === 0) {
+      document.getElementById('lyrics-container').innerHTML =
+        '<div class="lyrics-empty"><span>😔</span>Lirik tidak tersedia</div>';
+    } else {
+      this._renderLyrics(0);
+    }
+  }
+
+  _updateNowPlayingUI(track) {
+    document.getElementById('np-title').textContent  = track.title;
+    document.getElementById('np-artist').textContent = track.artist;
+    const npThumb = document.getElementById('np-thumb');
+    if (track.photo || track.thumb) {
+      npThumb.outerHTML = `<img class="np-cover" id="np-thumb" src="${track.photo || track.thumb}" onerror="this.style.display='none'" alt="">`;
+    }
+  }
+
+  _updatePlayerThumb(track) {
+    const el = document.getElementById('player-thumb');
+    if (track.photo || track.thumb) {
+      el.outerHTML = `<img class="player-thumb" id="player-thumb" src="${track.photo || track.thumb}" onerror="this.style.display='none'" alt="">`;
+    }
+  }
+
+  // ----------------------------------------------------------
+  //  PLAYLIST
+  // ----------------------------------------------------------
+  savePlaylist() {
+    localStorage.setItem('melodify_playlist', JSON.stringify(this.playlist));
+  }
+
+  addToPlaylist(track) {
+    if (this.playlist.find(t => t.videoId === track.videoId)) {
+      this.toast('⚠️ Lagu sudah ada di playlist'); return;
+    }
+    this.playlist.push({ ...track });
+    this.savePlaylist();
+    this.renderPlaylist();
+    this.toast('✅ Ditambahkan ke playlist');
+  }
+
+  removeFromPlaylist(idx) {
+    this.playlist.splice(idx, 1);
+    this.savePlaylist();
+    this.renderPlaylist();
+    this.toast('🗑️ Dihapus dari playlist');
+  }
+
+  renderPlaylist() {
+    const container = document.getElementById('playlist-container');
+    if (this.playlist.length === 0) {
+      container.innerHTML = '<div class="empty-state" style="padding:30px 10px;"><span>🎵</span><p style="font-size:0.78rem;">Cari lagu dan tambahkan ke playlist</p></div>';
+      return;
+    }
+    container.innerHTML = '';
+    this.playlist.forEach((track, i) => {
+      const isActive = this.currentTrack && this.currentTrack.videoId === track.videoId;
+      const div = document.createElement('div');
+      div.className = 'playlist-item' + (isActive ? ' playing' : '');
+      div.innerHTML = `
+        ${track.photo ? `<img class="playlist-thumb" src="${track.photo}" onerror="this.style.display='none'" alt="">` :
+          track.thumb ? `<img class="playlist-thumb" src="${track.thumb}" onerror="this.style.display='none'" alt="">` :
+          `<div class="playlist-thumb-placeholder">🎵</div>`}
+        <div class="playlist-info">
+          <div class="playlist-title">${this.esc(track.title)}</div>
+          <div class="playlist-artist">${this.esc(track.artist)}</div>
+        </div>
+        <div class="playing-bars"><span></span><span></span><span></span></div>
+        <button class="add-photo-btn" title="Tambah foto" onclick="app.openPhotoModal(${i},event)">🖼️</button>
+        <button class="remove-btn" title="Hapus" onclick="app.removeFromPlaylist(${i})">✕</button>
+      `;
+      div.addEventListener('click', (e) => {
+        if (e.target.classList.contains('remove-btn') || e.target.classList.contains('add-photo-btn')) return;
+        app.playTrack(this.playlist[i]);
+      });
+      container.appendChild(div);
+    });
+  }
+
+  playNext() {
+    if (!this.currentTrack || this.playlist.length === 0) return;
+    const idx  = this.playlist.findIndex(t => t.videoId === this.currentTrack.videoId);
+    const next = this.playlist[idx + 1] || this.playlist[0];
+    if (next) this.playTrack(next);
+  }
+
+  playPrev() {
+    if (!this.currentTrack || this.playlist.length === 0) return;
+    const idx  = this.playlist.findIndex(t => t.videoId === this.currentTrack.videoId);
+    const prev = this.playlist[idx - 1] || this.playlist[this.playlist.length - 1];
+    if (prev) this.playTrack(prev);
+  }
+
+  // ----------------------------------------------------------
+  //  PHOTO MODAL
+  // ----------------------------------------------------------
+  openPhotoModal(trackIdx, e) {
+    if (e) e.stopPropagation();
+    this.photoTarget  = trackIdx;
+    this.pendingPhoto = null;
+    const track = this.playlist[trackIdx];
+    document.getElementById('photo-modal-sub').textContent = `Foto untuk: ${track.title}`;
+    document.getElementById('upload-zone').innerHTML =
+      `<span>🖼️</span><p>Klik atau drag foto ke sini<br><small>JPG, PNG, WebP</small></p>`;
+    document.getElementById('photo-modal').style.display = 'flex';
+  }
+
+  openPhotoModalCurrentTrack() {
+    if (!this.currentTrack) return;
+    const idx = this.playlist.findIndex(t => t.videoId === this.currentTrack.videoId);
+    if (idx === -1) { this.toast('Tambahkan ke playlist dulu'); return; }
+    this.openPhotoModal(idx);
+  }
+
+  savePhoto() {
+    if (this.photoTarget === null || this.pendingPhoto === null) {
+      this.toast('⚠️ Pilih foto terlebih dahulu'); return;
+    }
+    this.playlist[this.photoTarget].photo = this.pendingPhoto;
+    this.savePlaylist();
+    this.renderPlaylist();
+    if (this.currentTrack && this.currentTrack.videoId === this.playlist[this.photoTarget].videoId) {
+      this.currentTrack.photo = this.pendingPhoto;
+      this._updateNowPlayingUI(this.currentTrack);
+      this._updatePlayerThumb(this.currentTrack);
+    }
+    document.getElementById('photo-modal').style.display = 'none';
+    this.toast('📸 Foto berhasil disimpan');
+  }
+}
+
+// ------------------------------------------------------------------
+//  INISIALISASI
+// ------------------------------------------------------------------
+const app = new MelodifyPlayer();
+
+// Shortcut agar formatTime & escHtml tetap tersedia global
+function formatTime(s) { return app.fmt(s); }
+function escHtml(s)    { return app.esc(s); }
+function showToast(msg) { app.toast(msg); }
+function renderPlaylist() { app.renderPlaylist(); }
+function playNext() { app.playNext(); }
+function playPrev() { app.playPrev(); }
+function playTrack(t) { app.playTrack(t); }
+function addToPlaylist(t) { app.addToPlaylist(t); }
+function removeFromPlaylist(i) { app.removeFromPlaylist(i); }
+function openPhotoModal(i, e) { app.openPhotoModal(i, e); }
+function openPhotoModalCurrentTrack() { app.openPhotoModalCurrentTrack(); }
+
+// Dummy agar tidak error
+let ytPlayer = null, isPlaying = false, currentTime = 0, duration = 0;
+let lyricsCache = {}, lyrics = [], currentTrack = null;
+let playlist = [], photoTarget = null, pendingPhotoDataUrl = null;
+
+// ============================================================
+//  SONG DATABASE  (static — no API/CORS needed)
+// ============================================================
+const SONG_DB = [
+  // Nirvana
+  {videoId:"hTWKbfoikeg",title:"Smells Like Teen Spirit",artist:"Nirvana",tags:"nirvana grunge rock 90s"},
+  {videoId:"vabnZ9-ex7o",title:"Come As You Are",artist:"Nirvana",tags:"nirvana grunge rock 90s"},
+  {videoId:"pkcJEvMcnEg",title:"Lithium",artist:"Nirvana",tags:"nirvana grunge rock 90s lithium"},
+  {videoId:"6keXEFpSzFM",title:"In Bloom",artist:"Nirvana",tags:"nirvana grunge rock 90s"},
+  {videoId:"ZgjwCnSCmkg",title:"Heart-Shaped Box",artist:"Nirvana",tags:"nirvana grunge rock 90s"},
+  {videoId:"N9qYF9DZPdw",title:"Rape Me",artist:"Nirvana",tags:"nirvana grunge rock 90s"},
+  {videoId:"y8dHb_yx_gA",title:"The Man Who Sold The World",artist:"Nirvana",tags:"nirvana rock mtv unplugged"},
+  // Coldplay
+  {videoId:"dvgZkm1xWPE",title:"The Scientist",artist:"Coldplay",tags:"coldplay alternative rock pop"},
+  {videoId:"1G4isv_Fylg",title:"Clocks",artist:"Coldplay",tags:"coldplay alternative rock"},
+  {videoId:"RB-RcX5DS5A",title:"Yellow",artist:"Coldplay",tags:"coldplay alternative rock"},
+  {videoId:"0RbSMeKRzMk",title:"Fix You",artist:"Coldplay",tags:"coldplay alternative pop rock"},
+  {videoId:"yKNxeF4KMsY",title:"Speed of Sound",artist:"Coldplay",tags:"coldplay rock"},
+  {videoId:"nSDgHBxUbVQ",title:"Viva La Vida",artist:"Coldplay",tags:"coldplay pop rock"},
+  {videoId:"YykjpeuMNEk",title:"A Sky Full of Stars",artist:"Coldplay",tags:"coldplay pop"},
+  // Ed Sheeran
+  {videoId:"lp-EBQJaHEw",title:"Shape of You",artist:"Ed Sheeran",tags:"ed sheeran pop"},
+  {videoId:"JJbqwa09fY4",title:"Thinking Out Loud",artist:"Ed Sheeran",tags:"ed sheeran pop love"},
+  {videoId:"iuqt3HVMCpw",title:"Perfect",artist:"Ed Sheeran",tags:"ed sheeran pop love"},
+  {videoId:"4xmckWVPRaI",title:"Photograph",artist:"Ed Sheeran",tags:"ed sheeran pop"},
+  {videoId:"CBQGl6zokMs",title:"Castle on the Hill",artist:"Ed Sheeran",tags:"ed sheeran pop"},
+  {videoId:"MLv6WoihYoo",title:"Bad Habits",artist:"Ed Sheeran",tags:"ed sheeran pop"},
+  // Taylor Swift
+  {videoId:"nfWlot6h_JM",title:"Shake It Off",artist:"Taylor Swift",tags:"taylor swift pop"},
+  {videoId:"e-ORhEE9VVg",title:"Blank Space",artist:"Taylor Swift",tags:"taylor swift pop"},
+  {videoId:"q1bMnkBBJlk",title:"Love Story",artist:"Taylor Swift",tags:"taylor swift pop country"},
+  {videoId:"AgFeZr5ptV8",title:"Anti-Hero",artist:"Taylor Swift",tags:"taylor swift pop"},
+  {videoId:"GkZzc4PF1Mk",title:"Style",artist:"Taylor Swift",tags:"taylor swift pop 1989"},
+  {videoId:"K-a8s8OLBSE",title:"Cruel Summer",artist:"Taylor Swift",tags:"taylor swift pop"},
+  // Billie Eilish
+  {videoId:"DyDfgMOUjCI",title:"bad guy",artist:"Billie Eilish",tags:"billie eilish pop dark"},
+  {videoId:"H-GFd1sNBSc",title:"Happier Than Ever",artist:"Billie Eilish",tags:"billie eilish pop"},
+  {videoId:"MilO7GzBRg4",title:"Ocean Eyes",artist:"Billie Eilish",tags:"billie eilish pop"},
+  {videoId:"vkXOdl7F7jU",title:"Therefore I Am",artist:"Billie Eilish",tags:"billie eilish pop"},
+  // The Weeknd
+  {videoId:"XXYlFuWEuKI",title:"Blinding Lights",artist:"The Weeknd",tags:"the weeknd rnb pop"},
+  {videoId:"ygTZZpVkmKg",title:"Starboy",artist:"The Weeknd",tags:"the weeknd pop rnb"},
+  {videoId:"7vToriMiHd8",title:"Save Your Tears",artist:"The Weeknd",tags:"the weeknd pop"},
+  {videoId:"AMP9OGERC14",title:"Can't Feel My Face",artist:"The Weeknd",tags:"the weeknd pop"},
+  // Dua Lipa
+  {videoId:"oygrmJFKYZY",title:"Levitating",artist:"Dua Lipa",tags:"dua lipa pop dance"},
+  {videoId:"k2qgadSvNru",title:"Don't Start Now",artist:"Dua Lipa",tags:"dua lipa pop disco"},
+  {videoId:"OsiHh3USBmk",title:"New Rules",artist:"Dua Lipa",tags:"dua lipa pop"},
+  // Harry Styles
+  {videoId:"H5v3kku4y6Q",title:"Watermelon Sugar",artist:"Harry Styles",tags:"harry styles pop"},
+  {videoId:"aHBOGnXoiNk",title:"As It Was",artist:"Harry Styles",tags:"harry styles pop"},
+  {videoId:"VF-r5TtlT9w",title:"Adore You",artist:"Harry Styles",tags:"harry styles pop"},
+  // Bruno Mars
+  {videoId:"fRh_vgS2dFE",title:"Just The Way You Are",artist:"Bruno Mars",tags:"bruno mars pop love"},
+  {videoId:"OPf0YbXqDm0",title:"Uptown Funk",artist:"Bruno Mars",tags:"bruno mars mark ronson funk pop"},
+  {videoId:"e4Ao-oefVLo",title:"Grenade",artist:"Bruno Mars",tags:"bruno mars pop"},
+  {videoId:"e4Ao-oefVLo",title:"Count On Me",artist:"Bruno Mars",tags:"bruno mars pop"},
+  {videoId:"gdZLi9oWNZg",title:"24K Magic",artist:"Bruno Mars",tags:"bruno mars pop funk"},
+  // Adele
+  {videoId:"rYEDA3JcQqw",title:"Rolling in the Deep",artist:"Adele",tags:"adele pop soul"},
+  {videoId:"Bo0gP5N4EVA",title:"Hello",artist:"Adele",tags:"adele pop soul ballad"},
+  {videoId:"YQHsXMglC9A",title:"Someone Like You",artist:"Adele",tags:"adele pop ballad"},
+  {videoId:"Em5OMEf4D_Y",title:"Easy On Me",artist:"Adele",tags:"adele pop ballad"},
+  // Imagine Dragons
+  {videoId:"ktvTqknDobU",title:"Radioactive",artist:"Imagine Dragons",tags:"imagine dragons rock pop alternative"},
+  {videoId:"mWRsgZuwf_8",title:"Believer",artist:"Imagine Dragons",tags:"imagine dragons rock pop"},
+  {videoId:"7wtfhZwyrcc",title:"Thunder",artist:"Imagine Dragons",tags:"imagine dragons pop rock"},
+  {videoId:"hgfewTBP-WA",title:"Enemy",artist:"Imagine Dragons",tags:"imagine dragons pop rock"},
+  {videoId:"fKopy74weus",title:"Demons",artist:"Imagine Dragons",tags:"imagine dragons pop rock"},
+  // Linkin Park
+  {videoId:"eVTXPUF4Oz4",title:"In The End",artist:"Linkin Park",tags:"linkin park rock alternative nu-metal"},
+  {videoId:"ZpUYjpKg9KY",title:"Numb",artist:"Linkin Park",tags:"linkin park rock alternative"},
+  {videoId:"UqyT8IEBkvY",title:"Crawling",artist:"Linkin Park",tags:"linkin park rock"},
+  {videoId:"7MaUJMNbWpA",title:"Faint",artist:"Linkin Park",tags:"linkin park rock"},
+  {videoId:"0-Zr-myuzoo",title:"Somewhere I Belong",artist:"Linkin Park",tags:"linkin park rock"},
+  // Green Day
+  {videoId:"Soa3gO7tL-c",title:"Boulevard of Broken Dreams",artist:"Green Day",tags:"green day rock punk"},
+  {videoId:"NUTGr5t3MoY",title:"Wake Me Up When September Ends",artist:"Green Day",tags:"green day rock"},
+  {videoId:"6L7SkM-n1EM",title:"American Idiot",artist:"Green Day",tags:"green day rock punk"},
+  // Eminem
+  {videoId:"_Yhyp-_hX2s",title:"Lose Yourself",artist:"Eminem",tags:"eminem rap hip-hop"},
+  {videoId:"uelHwf8o7_U",title:"Without Me",artist:"Eminem",tags:"eminem rap hip-hop"},
+  {videoId:"sAUNIgEW-R0",title:"Stan",artist:"Eminem",tags:"eminem rap hip-hop"},
+  {videoId:"jHPmGM2cJjQ",title:"Rap God",artist:"Eminem",tags:"eminem rap hip-hop"},
+  // Kendrick Lamar
+  {videoId:"TVSg84QQnj4",title:"HUMBLE.",artist:"Kendrick Lamar",tags:"kendrick lamar rap hip-hop"},
+  {videoId:"Z-48u_uWMHY",title:"Not Like Us",artist:"Kendrick Lamar",tags:"kendrick lamar rap hip-hop"},
+  {videoId:"jWsoFgAQkeI",title:"Swimming Pools",artist:"Kendrick Lamar",tags:"kendrick lamar rap hip-hop"},
+  // Drake
+  {videoId:"uxpDa-c-4Mc",title:"God's Plan",artist:"Drake",tags:"drake rap hip-hop"},
+  {videoId:"CvBfHwUxHIk",title:"Hotline Bling",artist:"Drake",tags:"drake rap hip-hop"},
+  {videoId:"DRS_PpOrUZ4",title:"One Dance",artist:"Drake",tags:"drake pop rnb"},
+  // Post Malone
+  {videoId:"UceaB4D0jpo",title:"Rockstar",artist:"Post Malone",tags:"post malone rap hip-hop"},
+  {videoId:"ApXoWvfEYVU",title:"Sunflower",artist:"Post Malone",tags:"post malone pop"},
+  {videoId:"wXhTHyIgQ_U",title:"Circles",artist:"Post Malone",tags:"post malone pop"},
+  // Ariana Grande
+  {videoId:"pt7LHKT3BUQ",title:"thank u, next",artist:"Ariana Grande",tags:"ariana grande pop"},
+  {videoId:"QYh6mYIJG2Y",title:"7 rings",artist:"Ariana Grande",tags:"ariana grande pop rap"},
+  {videoId:"GL1UC93fxHQ",title:"Problem",artist:"Ariana Grande",tags:"ariana grande pop"},
+  {videoId:"CDdvReNKKuk",title:"Into You",artist:"Ariana Grande",tags:"ariana grande pop dance"},
+  // Maroon 5
+  {videoId:"KRaWnd3LJfs",title:"Sugar",artist:"Maroon 5",tags:"maroon 5 pop"},
+  {videoId:"_FrOQC-zEog",title:"Maps",artist:"Maroon 5",tags:"maroon 5 pop rock"},
+  {videoId:"_FrOQC-zEog",title:"Animals",artist:"Maroon 5",tags:"maroon 5 pop"},
+  {videoId:"OZ4N_2BJZAA",title:"Girls Like You",artist:"Maroon 5",tags:"maroon 5 pop"},
+  // Queen
+  {videoId:"hFDcoX7s6rE",title:"Bohemian Rhapsody",artist:"Queen",tags:"queen rock classic 70s"},
+  {videoId:"OlMKgpFuFTM",title:"Don't Stop Me Now",artist:"Queen",tags:"queen rock classic"},
+  {videoId:"bGwhyQOVr1s",title:"We Will Rock You",artist:"Queen",tags:"queen rock classic"},
+  {videoId:"OL7o5iCRPgM",title:"Another One Bites the Dust",artist:"Queen",tags:"queen rock classic"},
+  {videoId:"rTyKk53Wf3Q",title:"Somebody to Love",artist:"Queen",tags:"queen rock classic"},
+  // Michael Jackson
+  {videoId:"sOnqjkJTMaA",title:"Thriller",artist:"Michael Jackson",tags:"michael jackson pop classic 80s"},
+  {videoId:"e2-HvpFeEbg",title:"Billie Jean",artist:"Michael Jackson",tags:"michael jackson pop classic"},
+  {videoId:"Zi_XLOBDo_Y",title:"Beat It",artist:"Michael Jackson",tags:"michael jackson pop rock classic"},
+  {videoId:"h_D3VFfhvs4",title:"Smooth Criminal",artist:"Michael Jackson",tags:"michael jackson pop classic"},
+  // BTS
+  {videoId:"gdZLi9oWNZg",title:"Dynamite",artist:"BTS",tags:"bts kpop pop"},
+  {videoId:"MBdVXkSdhwU",title:"Boy With Luv",artist:"BTS",tags:"bts kpop pop"},
+  {videoId:"pBuZEGYXA6E",title:"DNA",artist:"BTS",tags:"bts kpop pop"},
+  {videoId:"7C2z4GqqS5E",title:"FAKE LOVE",artist:"BTS",tags:"bts kpop pop"},
+  // BLACKPINK
+  {videoId:"ioNng23DkIM",title:"DDU-DU DDU-DU",artist:"BLACKPINK",tags:"blackpink kpop pop"},
+  {videoId:"Amq-qlqbjYA",title:"Kill This Love",artist:"BLACKPINK",tags:"blackpink kpop pop"},
+  {videoId:"IHNnFKqFRhQ",title:"How You Like That",artist:"BLACKPINK",tags:"blackpink kpop pop"},
+  // Dewa 19
+  {videoId:"J3QL3bC8pMQ",title:"Cinta 'Tlah Membawamu Pergi",artist:"Dewa 19",tags:"dewa 19 indonesia pop rock"},
+  {videoId:"RFnOcjUyRFg",title:"Separuh Nafasku",artist:"Dewa 19",tags:"dewa 19 indonesia pop rock separuh nafas"},
+  {videoId:"Qj6TF-_PQXM",title:"Kangen",artist:"Dewa 19",tags:"dewa 19 indonesia pop rock"},
+  {videoId:"k4MsCEFokIg",title:"Pupus",artist:"Dewa 19",tags:"dewa 19 indonesia pop"},
+  // Sheila on 7
+  {videoId:"XQKP3MtpGSE",title:"Dan",artist:"Sheila on 7",tags:"sheila on 7 indonesia pop rock"},
+  {videoId:"pJGNpMtTpS8",title:"Anugerah Terindah Yang Pernah Kumiliki",artist:"Sheila on 7",tags:"sheila on 7 indonesia pop"},
+  {videoId:"T8FVXMU0I8k",title:"Melompat Lebih Tinggi",artist:"Sheila on 7",tags:"sheila on 7 indonesia pop rock"},
+  // Peterpan / Noah
+  {videoId:"WPFan6GHmIc",title:"Mungkin Nanti",artist:"Peterpan",tags:"peterpan indonesia pop rock"},
+  {videoId:"Zln_O0i3Cxg",title:"Semua Tentang Kita",artist:"Peterpan",tags:"peterpan indonesia pop rock"},
+  {videoId:"a98d2EIhEOU",title:"Separuh Aku",artist:"Noah",tags:"noah indonesia pop rock"},
+  {videoId:"5rbZqAH_4vc",title:"Tak Lagi Sama",artist:"Noah",tags:"noah indonesia pop rock"},
+  // Rizky Febian
+  {videoId:"FXh9HFJRSew",title:"Kesempurnaan Cinta",artist:"Rizky Febian",tags:"rizky febian indonesia pop"},
+  // Raisa
+  {videoId:"FUNgW_s0A2I",title:"Jatuh Hati",artist:"Raisa",tags:"raisa indonesia pop"},
+  {videoId:"zqN9zIxbGxA",title:"Could It Be",artist:"Raisa",tags:"raisa indonesia pop"},
+  // Tulus
+  {videoId:"vFEW4-Dv5Kg",title:"Gajah",artist:"Tulus",tags:"tulus indonesia pop"},
+  {videoId:"XhMMc5-vEFE",title:"Sepatu",artist:"Tulus",tags:"tulus indonesia pop"},
+  // Kunto Aji
+  {videoId:"HMLs-4fVLnc",title:"Rehat",artist:"Kunto Aji",tags:"kunto aji indonesia pop indie"},
+  // Hindia
+  {videoId:"0iw2CBKH1xQ",title:"Besok Mungkin Kita Sampai",artist:"Hindia",tags:"hindia indonesia indie pop"},
+  // Fourtwnty
+  {videoId:"4mXaC80OcMg",title:"Zona Nyaman",artist:"Fourtwnty",tags:"fourtwnty indonesia indie pop"},
+  // Isyana Sarasvati
+  {videoId:"uMVh9TZTM0I",title:"Keep Being You",artist:"Isyana Sarasvati",tags:"isyana indonesia pop"},
+  // Afgan
+  {videoId:"RmHGGFbSWxE",title:"Terima Kasih Cinta",artist:"Afgan",tags:"afgan indonesia pop"},
+  // Rossa
+  {videoId:"RuPyVZNMvdo",title:"Ku Menunggu",artist:"Rossa",tags:"rossa indonesia pop"},
+  // Siti Badriah
+  {videoId:"0KVCLDfBVZY",title:"Lagi Syantik",artist:"Siti Badriah",tags:"siti badriah indonesia pop dangdut"},
+  // Mahalini
+  {videoId:"8bpW2KQINLQ",title:"Melawan Restu",artist:"Mahalini",tags:"mahalini indonesia pop"},
+  // Tiara Andini
+  {videoId:"JRuGR7UGobA",title:"Gemintang Hatiku",artist:"Tiara Andini",tags:"tiara andini indonesia pop"},
+  // Fiersa Besari
+  {videoId:"tAUqbL0YhIs",title:"Waktu Yang Salah",artist:"Fiersa Besari",tags:"fiersa besari indonesia indie pop"},
+  // Payung Teduh
+  {videoId:"H8s6Rb9YF9Y",title:"Akad",artist:"Payung Teduh",tags:"payung teduh indonesia indie pop folk"},
+  // Maliq & d'Essentials
+  {videoId:"6a4BWpBJppI",title:"Terdiam Sepi",artist:"Maliq & d'Essentials",tags:"maliq indonesia pop jazz"},
+  // Kahitna
+  {videoId:"2fvUGlxsevY",title:"Cantik",artist:"Kahitna",tags:"kahitna indonesia pop"},
+  // Various popular
+  {videoId:"60ItHLz5WEA",title:"Alan Walker - Faded",artist:"Alan Walker",tags:"alan walker faded edm electronic"},
+  {videoId:"pB-5XG-DbAA",title:"Alone",artist:"Alan Walker",tags:"alan walker alone edm"},
+  {videoId:"450p7goxZqg",title:"All Falls Down",artist:"Alan Walker",tags:"alan walker edm"},
+  {videoId:"dQw4w9WgXcQ",title:"Never Gonna Give You Up",artist:"Rick Astley",tags:"rick astley 80s pop classic"},
+  {videoId:"JGwWNGJdvx8",title:"Shape of You (Live)",artist:"Ed Sheeran",tags:"ed sheeran pop live"},
+  {videoId:"CevxZvSJLk8",title:"Katy Perry - Roar",artist:"Katy Perry",tags:"katy perry pop roar"},
+  {videoId:"0KSOMA3QBU0",title:"Dark Horse",artist:"Katy Perry",tags:"katy perry pop"},
+  {videoId:"QGJuMBdaqIw",title:"Firework",artist:"Katy Perry",tags:"katy perry pop"},
+  {videoId:"sc5BZOhf37E",title:"Party Rock Anthem",artist:"LMFAO",tags:"lmfao pop dance"},
+  {videoId:"09R8_2nJtjg",title:"Titanium",artist:"David Guetta ft. Sia",tags:"david guetta sia edm pop titanium"},
+  {videoId:"JRfuAukYTKg",title:"Chandelier",artist:"Sia",tags:"sia pop"},
+  {videoId:"OPQKHyFiXN8",title:"Unstoppable",artist:"Sia",tags:"sia pop"},
+  {videoId:"o_v9MY_FMcw",title:"Cheap Thrills",artist:"Sia",tags:"sia pop"},
+  {videoId:"2Vv-BfVoq4g",title:"Perfect",artist:"Ed Sheeran",tags:"ed sheeran pop perfect"},
+  {videoId:"ru0K8uYEZWw",title:"Stay With Me",artist:"Sam Smith",tags:"sam smith pop soul"},
+  {videoId:"_3hBZVHzXos",title:"I'm Not The Only One",artist:"Sam Smith",tags:"sam smith pop soul"},
+  {videoId:"nCkpzqqog4k",title:"Havana",artist:"Camila Cabello",tags:"camila cabello pop latin"},
+  {videoId:"v1PBptSDIh8",title:"Señorita",artist:"Shawn Mendes & Camila Cabello",tags:"shawn mendes camila cabello pop"},
+  {videoId:"pXRviuL6vMY",title:"Treat You Better",artist:"Shawn Mendes",tags:"shawn mendes pop"},
+  {videoId:"rPpKcwKVG1Q",title:"Stitches",artist:"Shawn Mendes",tags:"shawn mendes pop"},
+  {videoId:"TB54dZkzZOY",title:"Something Just Like This",artist:"The Chainsmokers & Coldplay",tags:"chainsmokers coldplay edm pop"},
+  {videoId:"SimsPCy2HDA",title:"Closer",artist:"The Chainsmokers",tags:"chainsmokers pop edm"},
+  {videoId:"7PCkvCPvDXk",title:"Don't Let Me Down",artist:"The Chainsmokers",tags:"chainsmokers edm pop"},
+  {videoId:"iLsp6lTL-NE",title:"Stressed Out",artist:"Twenty One Pilots",tags:"twenty one pilots pop rock alternative"},
+  {videoId:"q0OJLlHFJ8g",title:"Heathens",artist:"Twenty One Pilots",tags:"twenty one pilots pop rock"},
+  {videoId:"pXRviuL6vMY",title:"Ride",artist:"Twenty One Pilots",tags:"twenty one pilots pop"},
+  {videoId:"3YxaaGgTQYM",title:"Happier",artist:"Marshmello & Bastille",tags:"marshmello bastille edm pop happier"},
+  {videoId:"uSD4vsh1zDA",title:"Silence",artist:"Marshmello",tags:"marshmello edm pop"},
+  {videoId:"gCYcHz2k5x0",title:"FRIENDS",artist:"Marshmello & Anne-Marie",tags:"marshmello anne-marie pop"},
+  {videoId:"h--P8HzYZ74",title:"Hello",artist:"Lionel Richie",tags:"lionel richie classic pop 80s"},
+  {videoId:"SDZAkGCkMGo",title:"Africa",artist:"Toto",tags:"toto classic pop 80s africa"},
+  {videoId:"FTQbiNvZqaY",title:"Eye of the Tiger",artist:"Survivor",tags:"survivor classic rock 80s eye tiger"},
+  {videoId:"btPJPFnesV4",title:"Every Breath You Take",artist:"The Police",tags:"the police classic pop rock 80s"},
+  {videoId:"d27gTrPPAyk",title:"Hotel California",artist:"Eagles",tags:"eagles classic rock 70s 80s"},
+  {videoId:"hHW1oY26kxQ",title:"Stairway to Heaven",artist:"Led Zeppelin",tags:"led zeppelin classic rock 70s"},
+  {videoId:"BW3gKKiTvjs",title:"Sweet Child O' Mine",artist:"Guns N' Roses",tags:"guns n roses classic rock 80s"},
+  {videoId:"0-Zr-myuzoo",title:"November Rain",artist:"Guns N' Roses",tags:"guns n roses classic rock 90s"},
+];
+
+// ============================================================
+//  SEARCH — fuzzy search lokal (tidak perlu API/CORS)
+// ============================================================
+function searchSongs(query) {
+  const q     = query.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+  const words = q.split(/\s+/).filter(Boolean);
+  if (!words.length) return SONG_DB.slice(0, 12).map(toTrack);
+
+  const scored = SONG_DB.map(song => {
+    const hay = (song.title + ' ' + song.artist + ' ' + song.tags).toLowerCase();
+    let score = 0;
+    words.forEach(w => { if (hay.includes(w)) score += w.length * 2; });
+    if (song.artist.toLowerCase().includes(q)) score += 25;
+    if (song.title.toLowerCase().includes(q))  score += 18;
+    return { song, score };
   });
+
+  return scored.filter(r => r.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 12)
+    .map(r => toTrack(r.song));
 }
 
-function playNext() {
-  if (!currentTrack || playlist.length === 0) return;
-  const idx = playlist.findIndex(t => t.videoId === currentTrack.videoId);
-  const next = playlist[idx + 1] || playlist[0];
-  if (next) playTrack(next, true);
-}
-
-function playPrev() {
-  if (!currentTrack || playlist.length === 0) return;
-  const idx = playlist.findIndex(t => t.videoId === currentTrack.videoId);
-  const prev = playlist[idx - 1] || playlist[playlist.length - 1];
-  if (prev) playTrack(prev, true);
+function toTrack(s) {
+  return {
+    videoId: s.videoId,
+    title:   s.title,
+    artist:  s.artist,
+    thumb:   `https://i.ytimg.com/vi/${s.videoId}/mqdefault.jpg`
+  };
 }
 
 // ============================================================
@@ -1495,7 +1796,6 @@ async function doSearch() {
   document.getElementById('results-section').style.display = 'block';
   document.getElementById('results-label').textContent = `Hasil untuk "${q}"`;
 
-  // Show skeletons
   const grid = document.getElementById('results-grid');
   grid.innerHTML = Array(8).fill(0).map(() => `
     <div class="sk-card">
@@ -1505,175 +1805,107 @@ async function doSearch() {
     </div>
   `).join('');
 
-  try {
-    const results = await searchYouTube(q);
-    grid.innerHTML = '';
-    results.forEach(track => {
-      const card = document.createElement('div');
-      card.className = 'result-card';
-      card.innerHTML = `
-        <img class="result-thumb" src="${track.thumb}" alt="" loading="lazy">
-        <div class="result-play-overlay">
-          <svg viewBox="0 0 24 24" fill="black"><path d="M8 5v14l11-7z"/></svg>
-        </div>
-        <div class="result-title">${escHtml(track.title)}</div>
-        <div class="result-artist">${escHtml(track.artist)}</div>
-        <button class="add-to-playlist-btn" title="Tambah ke playlist">+</button>
-      `;
-      card.querySelector('.result-play-overlay').addEventListener('click', () => playTrack(track));
-      card.querySelector('.result-title').addEventListener('click', () => playTrack(track));
-      card.querySelector('.result-thumb').addEventListener('click', () => playTrack(track));
-      card.querySelector('.add-to-playlist-btn').addEventListener('click', (e) => {
-        e.stopPropagation();
-        addToPlaylist(track);
-      });
-      grid.appendChild(card);
+  // Tunda sedikit agar skeleton terlihat
+  await new Promise(r => setTimeout(r, 200));
+
+  const results = searchSongs(q);
+  grid.innerHTML = '';
+  if (results.length === 0) {
+    grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--text-muted);">Tidak ada hasil untuk "<b>${app.esc(q)}</b>"</div>`;
+    return;
+  }
+  results.forEach(track => {
+    const card = document.createElement('div');
+    card.className = 'result-card';
+    card.innerHTML = `
+      <img class="result-thumb" src="${track.thumb}" alt="" loading="lazy" onerror="this.src='https://i.ytimg.com/vi/${track.videoId}/default.jpg'">
+      <div class="result-play-overlay">
+        <svg viewBox="0 0 24 24" fill="black"><path d="M8 5v14l11-7z"/></svg>
+      </div>
+      <div class="result-title">${app.esc(track.title)}</div>
+      <div class="result-artist">${app.esc(track.artist)}</div>
+      <button class="add-to-playlist-btn" title="Tambah ke playlist">+</button>
+    `;
+    card.querySelector('.result-play-overlay').addEventListener('click', () => app.playTrack(track));
+    card.querySelector('.result-title').addEventListener('click', () => app.playTrack(track));
+    card.querySelector('.result-thumb').addEventListener('click', () => app.playTrack(track));
+    card.querySelector('.add-to-playlist-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      app.addToPlaylist(track);
     });
-    if (results.length === 0) {
-      grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--text-muted);">Tidak ada hasil ditemukan</div>';
-    }
-  } catch(e) {
-    grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--text-muted);">${e.message}</div>`;
-  }
+    grid.appendChild(card);
+  });
 }
 
 // ============================================================
-//  PHOTO UPLOAD MODAL
+//  PHOTO HELPER
 // ============================================================
-function openPhotoModal(trackIdx, e) {
-  if (e) e.stopPropagation();
-  photoTarget = trackIdx;
-  pendingPhotoDataUrl = null;
-  const track = playlist[trackIdx];
-  document.getElementById('photo-modal-sub').textContent = `Foto untuk: ${track.title}`;
-  document.getElementById('upload-zone').innerHTML = `<span>🖼️</span><p>Klik atau drag foto ke sini<br><small>JPG, PNG, WebP</small></p>`;
-  document.getElementById('photo-modal').style.display = 'flex';
-}
-
-function openPhotoModalCurrentTrack() {
-  if (!currentTrack) return;
-  const idx = playlist.findIndex(t => t.videoId === currentTrack.videoId);
-  if (idx === -1) { showToast('Tambahkan ke playlist dulu'); return; }
-  openPhotoModal(idx);
-}
-
-// ============================================================
-//  HELPERS
-// ============================================================
-function escHtml(s) {
-  if (!s) return '';
-  const d = document.createElement('div');
-  d.textContent = s;
-  return d.innerHTML;
-}
-
-function showToast(msg, dur = 2500) {
-  const t = document.getElementById('toast');
-  t.textContent = msg;
-  t.classList.add('show');
-  setTimeout(() => t.classList.remove('show'), dur);
-}
-
-// ============================================================
-//  EVENT LISTENERS
-// ============================================================
-document.getElementById('search-btn').addEventListener('click', doSearch);
-document.getElementById('search-input').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') doSearch();
-});
-
-document.getElementById('btn-play').addEventListener('click', () => {
-  if (!ytPlayer || !currentTrack) return;
-  if (isPlaying) ytPlayer.pauseVideo();
-  else ytPlayer.playVideo();
-});
-
-document.getElementById('btn-next').addEventListener('click', playNext);
-document.getElementById('btn-prev').addEventListener('click', playPrev);
-
-document.getElementById('progress-track').addEventListener('click', (e) => {
-  if (!ytPlayer || !duration) return;
-  const rect = e.currentTarget.getBoundingClientRect();
-  const pct = (e.clientX - rect.left) / rect.width;
-  ytPlayer.seekTo(pct * duration, true);
-});
-
-document.getElementById('volume-slider').addEventListener('input', (e) => {
-  if (ytPlayer) ytPlayer.setVolume(parseInt(e.target.value));
-});
-
-document.getElementById('np-add-playlist').addEventListener('click', () => {
-  if (currentTrack) addToPlaylist(currentTrack);
-});
-
-document.getElementById('np-add-photo').addEventListener('click', openPhotoModalCurrentTrack);
-
-// Photo modal
-document.getElementById('photo-cancel').addEventListener('click', () => {
-  document.getElementById('photo-modal').style.display = 'none';
-});
-
-document.getElementById('photo-modal').addEventListener('click', (e) => {
-  if (e.target === document.getElementById('photo-modal')) {
-    document.getElementById('photo-modal').style.display = 'none';
-  }
-});
-
-document.getElementById('upload-zone').addEventListener('click', () => {
-  document.getElementById('photo-file-input').click();
-});
-
-document.getElementById('upload-zone').addEventListener('dragover', (e) => {
-  e.preventDefault();
-  document.getElementById('upload-zone').style.borderColor = 'var(--accent)';
-});
-
-document.getElementById('upload-zone').addEventListener('drop', (e) => {
-  e.preventDefault();
-  const file = e.dataTransfer.files[0];
-  if (file) handlePhotoFile(file);
-});
-
-document.getElementById('photo-file-input').addEventListener('change', (e) => {
-  if (e.target.files[0]) handlePhotoFile(e.target.files[0]);
-});
-
 function handlePhotoFile(file) {
   const reader = new FileReader();
   reader.onload = (e) => {
-    pendingPhotoDataUrl = e.target.result;
+    app.pendingPhoto = e.target.result;
     document.getElementById('upload-zone').innerHTML = `
-      <img src="${pendingPhotoDataUrl}" style="width:100%;height:120px;object-fit:cover;border-radius:8px;">
+      <img src="${app.pendingPhoto}" style="width:100%;height:120px;object-fit:cover;border-radius:8px;">
       <p style="margin-top:8px;font-size:0.75rem;color:var(--accent);">✅ Foto dipilih</p>
     `;
   };
   reader.readAsDataURL(file);
 }
 
-document.getElementById('photo-save').addEventListener('click', () => {
-  if (photoTarget === null || pendingPhotoDataUrl === null) {
-    showToast('⚠️ Pilih foto terlebih dahulu');
-    return;
-  }
-  playlist[photoTarget].photo = pendingPhotoDataUrl;
-  savePlaylist();
-  renderPlaylist();
+// ============================================================
+//  EVENT LISTENERS
+// ============================================================
+document.getElementById('search-btn').addEventListener('click', doSearch);
+document.getElementById('search-input').addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
 
-  // Update current if same
-  if (currentTrack && currentTrack.videoId === playlist[photoTarget].videoId) {
-    currentTrack.photo = pendingPhotoDataUrl;
-    updateNowPlayingUI(currentTrack);
-    updatePlayerThumb(currentTrack);
-  }
+document.getElementById('btn-play').addEventListener('click', () => app.togglePlay());
+document.getElementById('btn-next').addEventListener('click', () => app.playNext());
+document.getElementById('btn-prev').addEventListener('click', () => app.playPrev());
 
-  document.getElementById('photo-modal').style.display = 'none';
-  showToast('📸 Foto berhasil disimpan');
+document.getElementById('progress-track').addEventListener('click', (e) => {
+  if (!app.youtubePlayer || !app.duration) return;
+  const rect = e.currentTarget.getBoundingClientRect();
+  const pct  = (e.clientX - rect.left) / rect.width;
+  app.youtubePlayer.seekTo(pct * app.duration, true);
 });
+
+document.getElementById('volume-slider').addEventListener('input', (e) => {
+  if (app.youtubePlayer) app.youtubePlayer.setVolume(parseInt(e.target.value));
+});
+
+document.getElementById('np-add-playlist').addEventListener('click', () => {
+  if (app.currentTrack) app.addToPlaylist(app.currentTrack);
+});
+document.getElementById('np-add-photo').addEventListener('click', () => app.openPhotoModalCurrentTrack());
+
+document.getElementById('photo-cancel').addEventListener('click', () => {
+  document.getElementById('photo-modal').style.display = 'none';
+});
+document.getElementById('photo-modal').addEventListener('click', (e) => {
+  if (e.target === document.getElementById('photo-modal'))
+    document.getElementById('photo-modal').style.display = 'none';
+});
+document.getElementById('upload-zone').addEventListener('click', () => {
+  document.getElementById('photo-file-input').click();
+});
+document.getElementById('upload-zone').addEventListener('dragover', (e) => {
+  e.preventDefault();
+  document.getElementById('upload-zone').style.borderColor = 'var(--accent)';
+});
+document.getElementById('upload-zone').addEventListener('drop', (e) => {
+  e.preventDefault();
+  const file = e.dataTransfer.files[0];
+  if (file) handlePhotoFile(file);
+});
+document.getElementById('photo-file-input').addEventListener('change', (e) => {
+  if (e.target.files[0]) handlePhotoFile(e.target.files[0]);
+});
+document.getElementById('photo-save').addEventListener('click', () => app.savePhoto());
 
 // ============================================================
 //  INIT
 // ============================================================
-renderPlaylist();
+app.renderPlaylist();
 </script>
 </body>
 </html>
