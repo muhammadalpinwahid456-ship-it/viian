@@ -381,26 +381,17 @@ function loadYouTubeAPI() {
 }
 
 // ─── Init/recreate player ────────────────────────────────
-// Mendukung dua mode:
-//   1. videoId  → langsung load video tertentu
-//   2. searchQuery → pakai listType=search (tidak perlu CORS/API key!)
 async function initPlayer(videoId, searchQuery) {
   await loadYouTubeAPI();
   if (YTP && YTP.destroy) { try { YTP.destroy(); } catch(e) {} }
   YTP = null;
 
   return new Promise((resolve) => {
-    const playerVars = { autoplay: 1, controls: 0, origin: location.origin };
-    if (!videoId && searchQuery) {
-      // listType=search: YouTube cari dan putar video pertama yang cocok
-      playerVars.listType = 'search';
-      playerVars.list     = searchQuery;
-    }
-
-    YTP = new YT.Player('yt-player', {
+    // Build config — JANGAN masukkan videoId ke object jika pakai listType=search
+    // karena YT.Player akan throw "Invalid video id" jika videoId=undefined/null
+    const cfg = {
       height: '1', width: '1',
-      videoId: videoId || undefined,
-      playerVars,
+      playerVars: { autoplay: 1, controls: 0, origin: location.origin },
       events: {
         onReady(e) {
           tot = e.target.getDuration();
@@ -420,7 +411,18 @@ async function initPlayer(videoId, searchQuery) {
           resolve();
         }
       }
-    });
+    };
+
+    if (videoId) {
+      // Mode 1: langsung load videoId tertentu
+      cfg.videoId = videoId;
+    } else if (searchQuery) {
+      // Mode 2: listType=search — YouTube search & putar otomatis, tanpa CORS
+      cfg.playerVars.listType = 'search';
+      cfg.playerVars.list     = searchQuery;
+    }
+
+    YTP = new YT.Player('yt-player', cfg);
   });
 }
 // ─── Fallback iframe jika player gagal (dari chat-notes) ──
