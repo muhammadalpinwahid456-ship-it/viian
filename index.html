@@ -1,0 +1,1668 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Melodify — Premium Music Player</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Clash+Display:wght@400;500;600;700&family=Syne:wght@400;500;600;700&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-deep: #080B12;
+    --bg-panel: #0F1420;
+    --bg-card: #151A28;
+    --bg-hover: #1C2235;
+    --accent: #1DB954;
+    --accent-dim: rgba(29,185,84,0.15);
+    --accent2: #4ECDC4;
+    --text-primary: #F0F4FF;
+    --text-secondary: #8B95B0;
+    --text-muted: #4A5170;
+    --border: rgba(255,255,255,0.06);
+    --glow: 0 0 40px rgba(29,185,84,0.2);
+    --radius: 16px;
+    --radius-sm: 10px;
+    --font-display: 'Clash Display', sans-serif;
+    --font-body: 'Syne', sans-serif;
+    --font-text: 'DM Sans', sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: var(--font-text);
+    background: var(--bg-deep);
+    color: var(--text-primary);
+    height: 100vh;
+    overflow: hidden;
+    display: grid;
+    grid-template-columns: 280px 1fr 340px;
+    grid-template-rows: 1fr 90px;
+    grid-template-areas:
+      "sidebar main lyrics"
+      "player player player";
+  }
+
+  /* Animated bg */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background:
+      radial-gradient(ellipse 600px 400px at 20% 80%, rgba(29,185,84,0.06) 0%, transparent 60%),
+      radial-gradient(ellipse 400px 600px at 80% 20%, rgba(78,205,196,0.04) 0%, transparent 60%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ===== SIDEBAR ===== */
+  #sidebar {
+    grid-area: sidebar;
+    background: var(--bg-panel);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+    z-index: 1;
+  }
+
+  .logo-wrap {
+    padding: 24px 20px 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .logo-icon {
+    width: 36px; height: 36px;
+    background: var(--accent);
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 0 20px rgba(29,185,84,0.4);
+  }
+
+  .logo-icon svg { width: 20px; height: 20px; }
+
+  .logo-text {
+    font-family: var(--font-display);
+    font-size: 1.4rem;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    background: linear-gradient(135deg, #fff 0%, #8B95B0 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .sidebar-nav {
+    padding: 0 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all 0.2s;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+  }
+
+  .nav-item:hover, .nav-item.active {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  .nav-item.active { color: var(--accent); }
+  .nav-item svg { width: 18px; height: 18px; flex-shrink: 0; }
+
+  .sidebar-section {
+    padding: 20px 20px 8px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+
+  /* Playlist in sidebar */
+  #playlist-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 12px 12px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--bg-hover) transparent;
+  }
+
+  .playlist-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+  }
+
+  .playlist-item:hover { background: var(--bg-hover); }
+  .playlist-item.playing { background: var(--accent-dim); }
+
+  .playlist-thumb {
+    width: 42px; height: 42px;
+    border-radius: 8px;
+    object-fit: cover;
+    background: var(--bg-card);
+    flex-shrink: 0;
+    position: relative;
+  }
+
+  .playlist-thumb-placeholder {
+    width: 42px; height: 42px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, var(--bg-card), var(--bg-hover));
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.1rem;
+    flex-shrink: 0;
+  }
+
+  .playlist-info { flex: 1; min-width: 0; }
+  .playlist-title {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .playlist-artist {
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .playlist-item.playing .playlist-title { color: var(--accent); }
+
+  .playing-bars {
+    display: none;
+    gap: 2px;
+    align-items: flex-end;
+    height: 14px;
+  }
+
+  .playlist-item.playing .playing-bars { display: flex; }
+
+  .playing-bars span {
+    width: 3px;
+    background: var(--accent);
+    border-radius: 2px;
+    animation: bar-anim 0.8s ease-in-out infinite;
+  }
+  .playing-bars span:nth-child(2) { animation-delay: 0.15s; }
+  .playing-bars span:nth-child(3) { animation-delay: 0.3s; }
+
+  @keyframes bar-anim {
+    0%, 100% { height: 4px; }
+    50% { height: 14px; }
+  }
+
+  .remove-btn {
+    opacity: 0;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 50%;
+    transition: all 0.2s;
+    font-size: 0.85rem;
+  }
+
+  .playlist-item:hover .remove-btn { opacity: 1; }
+  .remove-btn:hover { color: #ff4444; background: rgba(255,68,68,0.1); }
+
+  .add-photo-btn {
+    opacity: 0;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 3px;
+    border-radius: 4px;
+    transition: all 0.2s;
+    font-size: 0.75rem;
+    margin-left: 2px;
+  }
+  .playlist-item:hover .add-photo-btn { opacity: 1; }
+  .add-photo-btn:hover { color: var(--accent); }
+
+  /* ===== MAIN AREA ===== */
+  #main {
+    grid-area: main;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 24px;
+    position: relative;
+    z-index: 1;
+    scrollbar-width: thin;
+    scrollbar-color: var(--bg-hover) transparent;
+  }
+
+  /* Search */
+  .search-bar-wrap {
+    position: relative;
+    margin-bottom: 28px;
+  }
+
+  .search-bar-wrap svg {
+    position: absolute;
+    left: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-secondary);
+    width: 18px; height: 18px;
+    pointer-events: none;
+  }
+
+  #search-input {
+    width: 100%;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 50px;
+    padding: 14px 60px 14px 48px;
+    color: var(--text-primary);
+    font-family: var(--font-text);
+    font-size: 0.9rem;
+    outline: none;
+    transition: all 0.3s;
+  }
+
+  #search-input::placeholder { color: var(--text-muted); }
+  #search-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-dim);
+  }
+
+  #search-btn {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: var(--accent);
+    border: none;
+    border-radius: 50px;
+    padding: 8px 18px;
+    color: #000;
+    font-family: var(--font-body);
+    font-weight: 700;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  #search-btn:hover { transform: translateY(-50%) scale(1.05); box-shadow: var(--glow); }
+
+  /* Results */
+  #results-section { display: none; }
+
+  .section-title {
+    font-family: var(--font-display);
+    font-size: 1.1rem;
+    font-weight: 700;
+    margin-bottom: 14px;
+    color: var(--text-primary);
+  }
+
+  #results-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 14px;
+    margin-bottom: 28px;
+  }
+
+  .result-card {
+    background: var(--bg-card);
+    border-radius: var(--radius);
+    padding: 14px;
+    cursor: pointer;
+    transition: all 0.25s;
+    border: 1px solid transparent;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .result-card:hover {
+    background: var(--bg-hover);
+    border-color: var(--border);
+    transform: translateY(-3px);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.3);
+  }
+
+  .result-thumb {
+    width: 100%;
+    aspect-ratio: 1;
+    border-radius: var(--radius-sm);
+    object-fit: cover;
+    margin-bottom: 10px;
+    background: var(--bg-hover);
+  }
+
+  .result-play-overlay {
+    position: absolute;
+    top: 14px; left: 14px;
+    width: calc(100% - 28px);
+    aspect-ratio: 1;
+    background: rgba(0,0,0,0.4);
+    border-radius: var(--radius-sm);
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+
+  .result-card:hover .result-play-overlay { opacity: 1; }
+
+  .result-play-overlay svg {
+    width: 40px; height: 40px;
+    background: var(--accent);
+    border-radius: 50%;
+    padding: 10px;
+    color: #000;
+    box-shadow: 0 4px 20px rgba(29,185,84,0.5);
+  }
+
+  .result-title {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 2px;
+  }
+
+  .result-artist {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .add-to-playlist-btn {
+    position: absolute;
+    bottom: 14px; right: 14px;
+    background: var(--accent);
+    border: none;
+    border-radius: 50%;
+    width: 28px; height: 28px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    opacity: 0;
+    transition: all 0.2s;
+    color: #000;
+    font-size: 1.2rem;
+    font-weight: 700;
+    box-shadow: 0 4px 12px rgba(29,185,84,0.4);
+  }
+
+  .result-card:hover .add-to-playlist-btn { opacity: 1; }
+  .add-to-playlist-btn:hover { transform: scale(1.15); }
+
+  /* Now playing area */
+  #now-playing-section { margin-bottom: 24px; }
+
+  .now-playing-card {
+    background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-hover) 100%);
+    border-radius: 20px;
+    padding: 24px;
+    border: 1px solid var(--border);
+    display: flex;
+    gap: 20px;
+    align-items: center;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .now-playing-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse 300px 200px at 0% 100%, rgba(29,185,84,0.08) 0%, transparent 60%);
+    pointer-events: none;
+  }
+
+  .np-cover {
+    width: 100px; height: 100px;
+    border-radius: 12px;
+    object-fit: cover;
+    flex-shrink: 0;
+    background: var(--bg-deep);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  }
+
+  .np-cover-placeholder {
+    width: 100px; height: 100px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, #1C2235, #0F1420);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 2.5rem;
+    flex-shrink: 0;
+  }
+
+  .np-info { flex: 1; min-width: 0; }
+  .np-label {
+    font-size: 0.65rem;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+  .np-title {
+    font-family: var(--font-display);
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 4px;
+  }
+  .np-artist {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    margin-bottom: 14px;
+  }
+
+  .np-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+  .np-btn {
+    background: var(--bg-deep);
+    border: 1px solid var(--border);
+    border-radius: 50px;
+    padding: 6px 14px;
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    font-family: var(--font-text);
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex; align-items: center; gap: 5px;
+  }
+
+  .np-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .np-btn.active { background: var(--accent-dim); border-color: var(--accent); color: var(--accent); }
+
+  /* Hidden YT player */
+  #yt-iframe-holder {
+    position: fixed;
+    bottom: -1000px;
+    width: 1px; height: 1px;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  /* ===== LYRICS PANEL ===== */
+  #lyrics-panel {
+    grid-area: lyrics;
+    background: var(--bg-panel);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+    z-index: 1;
+  }
+
+  .lyrics-header {
+    padding: 20px 20px 14px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .lyrics-title {
+    font-family: var(--font-display);
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    display: flex; align-items: center; gap: 8px;
+  }
+
+  .lyrics-badge {
+    background: var(--accent-dim);
+    border: 1px solid rgba(29,185,84,0.3);
+    color: var(--accent);
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    padding: 2px 8px;
+    border-radius: 50px;
+    text-transform: uppercase;
+  }
+
+  #lyrics-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px 20px 20px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--bg-hover) transparent;
+    position: relative;
+  }
+
+  .lyrics-fade-top {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 60px;
+    background: linear-gradient(to bottom, var(--bg-panel), transparent);
+    pointer-events: none;
+    z-index: 2;
+  }
+
+  .lyrics-fade-bottom {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    height: 80px;
+    background: linear-gradient(to top, var(--bg-panel), transparent);
+    pointer-events: none;
+    z-index: 2;
+  }
+
+  .lyrics-line {
+    font-size: 0.92rem;
+    line-height: 1.7;
+    padding: 5px 0;
+    transition: all 0.4s ease;
+    cursor: default;
+    font-family: var(--font-text);
+    font-weight: 400;
+  }
+
+  .lyrics-line.past { color: var(--text-muted); font-size: 0.82rem; }
+  .lyrics-line.upcoming { color: var(--text-secondary); }
+  .lyrics-line.active {
+    color: var(--text-primary);
+    font-size: 1.08rem;
+    font-weight: 700;
+    font-family: var(--font-body);
+    text-shadow: 0 0 20px rgba(29,185,84,0.3);
+  }
+
+  .lyrics-empty {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    line-height: 1.8;
+  }
+
+  .lyrics-empty span { display: block; font-size: 2.5rem; margin-bottom: 12px; }
+
+  /* ===== PLAYER BAR ===== */
+  #player-bar {
+    grid-area: player;
+    background: rgba(8, 11, 18, 0.95);
+    backdrop-filter: blur(20px);
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 24px;
+    gap: 24px;
+    position: relative;
+    z-index: 10;
+  }
+
+  .player-track {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: 260px;
+    flex-shrink: 0;
+  }
+
+  .player-thumb {
+    width: 52px; height: 52px;
+    border-radius: 8px;
+    object-fit: cover;
+    background: var(--bg-card);
+    flex-shrink: 0;
+  }
+
+  .player-thumb-placeholder {
+    width: 52px; height: 52px;
+    border-radius: 8px;
+    background: var(--bg-card);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.3rem;
+    flex-shrink: 0;
+  }
+
+  .player-track-info { flex: 1; min-width: 0; }
+  .player-track-title {
+    font-size: 0.83rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .player-track-artist {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Controls center */
+  .player-controls {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .controls-btns {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+  }
+
+  .ctrl-btn {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex; align-items: center; justify-content: center;
+    padding: 4px;
+    border-radius: 50%;
+  }
+
+  .ctrl-btn:hover { color: var(--text-primary); transform: scale(1.1); }
+
+  .ctrl-btn svg { width: 18px; height: 18px; }
+
+  .play-pause-btn {
+    width: 44px; height: 44px;
+    background: var(--text-primary);
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.2s;
+    flex-shrink: 0;
+  }
+
+  .play-pause-btn:hover { transform: scale(1.08); background: white; box-shadow: var(--glow); }
+  .play-pause-btn svg { width: 20px; height: 20px; color: #000; }
+
+  /* Progress */
+  .progress-wrap {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .time-label {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    width: 36px;
+    flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .time-label.right { text-align: right; }
+
+  .progress-track {
+    flex: 1;
+    height: 4px;
+    background: var(--bg-hover);
+    border-radius: 4px;
+    position: relative;
+    cursor: pointer;
+    overflow: hidden;
+    transition: height 0.2s;
+  }
+
+  .progress-track:hover { height: 6px; }
+
+  .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    border-radius: 4px;
+    width: 0%;
+    transition: width 0.3s linear;
+    position: relative;
+  }
+
+  /* Volume */
+  .player-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 200px;
+    justify-content: flex-end;
+    flex-shrink: 0;
+  }
+
+  .volume-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .volume-wrap svg { width: 16px; height: 16px; color: var(--text-secondary); }
+
+  #volume-slider {
+    -webkit-appearance: none;
+    width: 80px;
+    height: 4px;
+    background: var(--bg-hover);
+    border-radius: 4px;
+    outline: none;
+    cursor: pointer;
+  }
+
+  #volume-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 12px; height: 12px;
+    background: var(--text-primary);
+    border-radius: 50%;
+    cursor: pointer;
+  }
+
+  /* ===== MODAL: Upload Photo ===== */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(4px);
+    animation: fadeIn 0.2s ease;
+  }
+
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+  .modal-card {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 28px;
+    width: 340px;
+    animation: slideUp 0.25s ease;
+  }
+
+  @keyframes slideUp {
+    from { transform: translateY(20px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+
+  .modal-title {
+    font-family: var(--font-display);
+    font-size: 1.1rem;
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+
+  .modal-sub {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-bottom: 20px;
+  }
+
+  .upload-zone {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 32px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-bottom: 16px;
+  }
+
+  .upload-zone:hover { border-color: var(--accent); background: var(--accent-dim); }
+  .upload-zone span { display: block; font-size: 2rem; margin-bottom: 8px; }
+  .upload-zone p { font-size: 0.8rem; color: var(--text-secondary); }
+
+  #photo-file-input { display: none; }
+
+  .modal-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+  }
+
+  .btn-secondary {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 50px;
+    padding: 8px 20px;
+    color: var(--text-secondary);
+    font-family: var(--font-text);
+    font-size: 0.82rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .btn-secondary:hover { color: var(--text-primary); border-color: var(--text-muted); }
+
+  .btn-primary {
+    background: var(--accent);
+    border: none;
+    border-radius: 50px;
+    padding: 8px 20px;
+    color: #000;
+    font-family: var(--font-text);
+    font-weight: 700;
+    font-size: 0.82rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .btn-primary:hover { transform: scale(1.04); box-shadow: var(--glow); }
+
+  /* Toast */
+  .toast {
+    position: fixed;
+    bottom: 110px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 50px;
+    padding: 10px 20px;
+    font-size: 0.82rem;
+    color: var(--text-primary);
+    z-index: 9999;
+    opacity: 0;
+    transition: all 0.3s ease;
+    pointer-events: none;
+    white-space: nowrap;
+  }
+
+  .toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+
+  /* Scrollbars */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--bg-hover); border-radius: 4px; }
+
+  /* Loading skeleton */
+  .skeleton {
+    background: linear-gradient(90deg, var(--bg-card) 25%, var(--bg-hover) 50%, var(--bg-card) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: var(--radius-sm);
+  }
+
+  @keyframes shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  .sk-card {
+    background: var(--bg-card);
+    border-radius: var(--radius);
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .sk-img { width: 100%; aspect-ratio: 1; }
+  .sk-line { height: 10px; width: 80%; }
+  .sk-line.short { width: 55%; }
+
+  /* Empty state */
+  .empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-muted);
+  }
+
+  .empty-state span { display: block; font-size: 3.5rem; margin-bottom: 16px; }
+  .empty-state h3 {
+    font-family: var(--font-display);
+    font-size: 1.2rem;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+  }
+  .empty-state p { font-size: 0.82rem; line-height: 1.7; }
+
+  /* Responsive fix */
+  @media (max-width: 1100px) {
+    body {
+      grid-template-columns: 240px 1fr;
+      grid-template-areas: "sidebar main" "player player";
+    }
+    #lyrics-panel { display: none; }
+  }
+
+  @media (max-width: 700px) {
+    body {
+      grid-template-columns: 1fr;
+      grid-template-areas: "main" "player";
+    }
+    #sidebar { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<aside id="sidebar">
+  <div class="logo-wrap">
+    <div class="logo-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.5" stroke-linecap="round">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M3 12a9 9 0 0 1 9-9 9 9 0 0 1 6.6 2.9"/>
+        <path d="M6.8 20.3A9 9 0 0 0 12 21a9 9 0 0 0 9-9"/>
+        <circle cx="12" cy="12" r="7"/>
+      </svg>
+    </div>
+    <span class="logo-text">Melodify</span>
+  </div>
+
+  <nav class="sidebar-nav">
+    <div class="nav-item active">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
+      Beranda
+    </div>
+    <div class="nav-item">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      Cari
+    </div>
+  </nav>
+
+  <div class="sidebar-section">Playlist Saya</div>
+
+  <div id="playlist-container">
+    <div class="empty-state" style="padding: 30px 10px;">
+      <span>🎵</span>
+      <p style="font-size:0.78rem;">Cari lagu dan tambahkan ke playlist</p>
+    </div>
+  </div>
+</aside>
+
+<!-- MAIN CONTENT -->
+<main id="main">
+  <!-- Search -->
+  <div class="search-bar-wrap">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+    <input id="search-input" type="text" placeholder="Cari artis, lagu, atau album..." autocomplete="off">
+    <button id="search-btn">Cari</button>
+  </div>
+
+  <!-- Now Playing -->
+  <div id="now-playing-section" style="display:none;">
+    <div class="now-playing-card" id="now-playing-card">
+      <div class="np-cover-placeholder" id="np-thumb">🎵</div>
+      <div class="np-info">
+        <div class="np-label">▶ Sedang Diputar</div>
+        <div class="np-title" id="np-title">—</div>
+        <div class="np-artist" id="np-artist">—</div>
+        <div class="np-actions">
+          <button class="np-btn" id="np-add-playlist">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+            Playlist
+          </button>
+          <button class="np-btn" id="np-add-photo">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+            Foto
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Search Results -->
+  <div id="results-section">
+    <div class="section-title" id="results-label">Hasil Pencarian</div>
+    <div id="results-grid"></div>
+  </div>
+
+  <!-- Empty / Welcome -->
+  <div id="welcome-state" class="empty-state" style="padding: 80px 40px;">
+    <span>🎧</span>
+    <h3>Temukan Musikmu</h3>
+    <p>Ketik nama artis atau judul lagu di atas untuk mulai mendengarkan. Nikmati lirik sinkron real-time.</p>
+  </div>
+</main>
+
+<!-- LYRICS PANEL -->
+<aside id="lyrics-panel">
+  <div class="lyrics-header">
+    <div class="lyrics-title">
+      Lirik
+      <span class="lyrics-badge" id="lyrics-badge">Live</span>
+    </div>
+  </div>
+  <div style="position:relative; flex:1; overflow:hidden; display:flex; flex-direction:column;">
+    <div class="lyrics-fade-top"></div>
+    <div id="lyrics-container">
+      <div class="lyrics-empty">
+        <span>🎤</span>
+        Lirik akan muncul di sini saat lagu diputar
+      </div>
+    </div>
+    <div class="lyrics-fade-bottom"></div>
+  </div>
+</aside>
+
+<!-- PLAYER BAR -->
+<div id="player-bar">
+  <!-- Track info -->
+  <div class="player-track">
+    <div class="player-thumb-placeholder" id="player-thumb">🎵</div>
+    <div class="player-track-info">
+      <div class="player-track-title" id="player-title">Tidak Ada Lagu</div>
+      <div class="player-track-artist" id="player-artist">—</div>
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <div class="player-controls">
+    <div class="controls-btns">
+      <button class="ctrl-btn" id="btn-prev" title="Sebelumnya">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg>
+      </button>
+      <button class="play-pause-btn" id="btn-play">
+        <svg id="play-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        <svg id="pause-icon" viewBox="0 0 24 24" fill="currentColor" style="display:none;"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+      </button>
+      <button class="ctrl-btn" id="btn-next" title="Berikutnya">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="m6 18 8.5-6L6 6v12zm2-6 8.5 6V6L8 12z"/></svg>
+      </button>
+    </div>
+    <div class="progress-wrap">
+      <span class="time-label" id="time-current">0:00</span>
+      <div class="progress-track" id="progress-track">
+        <div class="progress-fill" id="progress-fill"></div>
+      </div>
+      <span class="time-label right" id="time-total">0:00</span>
+    </div>
+  </div>
+
+  <!-- Volume -->
+  <div class="player-right">
+    <div class="volume-wrap">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>
+      <input type="range" id="volume-slider" min="0" max="100" value="80">
+    </div>
+  </div>
+</div>
+
+<!-- Hidden YouTube player -->
+<div id="yt-iframe-holder">
+  <div id="yt-player"></div>
+</div>
+
+<!-- Photo Upload Modal -->
+<div id="photo-modal" class="modal-overlay" style="display:none;">
+  <div class="modal-card">
+    <div class="modal-title">Tambah Foto Cover</div>
+    <div class="modal-sub" id="photo-modal-sub">Tambahkan foto untuk lagu ini</div>
+    <div class="upload-zone" id="upload-zone">
+      <span>🖼️</span>
+      <p>Klik atau drag foto ke sini<br><small>JPG, PNG, WebP</small></p>
+    </div>
+    <input type="file" id="photo-file-input" accept="image/*">
+    <div class="modal-actions">
+      <button class="btn-secondary" id="photo-cancel">Batal</button>
+      <button class="btn-primary" id="photo-save">Simpan</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<!-- YouTube IFrame API -->
+<script src="https://www.youtube.com/iframe_api"></script>
+
+<script>
+// ============================================================
+//  STATE
+// ============================================================
+const CLOUDFLARE_WORKER = 'https://delicate-boat-b40d.alpinwahid516.workers.dev';
+const YOUTUBE_SEARCH_WORKER = 'https://api.allorigins.win/get?url=';
+
+let ytPlayer = null;
+let ytReady = false;
+let isPlaying = false;
+let currentTime = 0;
+let duration = 0;
+let animId = null;
+let lyricsCache = {};
+let lyrics = [];
+let currentTrack = null; // { videoId, title, artist, thumb, photo? }
+let playlist = JSON.parse(localStorage.getItem('melodify_playlist') || '[]');
+let photoTarget = null; // track index for photo upload
+let pendingPhotoDataUrl = null;
+
+// ============================================================
+//  YT API Ready
+// ============================================================
+window.onYouTubeIframeAPIReady = function() {
+  ytReady = true;
+  ytPlayer = new YT.Player('yt-player', {
+    height: '1', width: '1',
+    playerVars: { autoplay: 0, controls: 0, origin: location.origin },
+    events: {
+      onReady: () => {},
+      onStateChange: onPlayerStateChange,
+      onError: (e) => { showToast('❌ Video tidak dapat diputar'); }
+    }
+  });
+};
+
+function onPlayerStateChange(e) {
+  if (e.data === YT.PlayerState.PLAYING) {
+    isPlaying = true;
+    updatePlayBtn(true);
+    duration = ytPlayer.getDuration();
+    updateTimeUI();
+    startTick();
+  } else if (e.data === YT.PlayerState.PAUSED) {
+    isPlaying = false;
+    updatePlayBtn(false);
+    cancelAnimationFrame(animId);
+  } else if (e.data === YT.PlayerState.ENDED) {
+    isPlaying = false;
+    updatePlayBtn(false);
+    cancelAnimationFrame(animId);
+    playNext();
+  }
+}
+
+function startTick() {
+  cancelAnimationFrame(animId);
+  function tick() {
+    if (!isPlaying || !ytPlayer) return;
+    try {
+      currentTime = ytPlayer.getCurrentTime() || 0;
+      duration = ytPlayer.getDuration() || 0;
+    } catch(e) { return; }
+    updateTimeUI();
+    renderLyricsLine(currentTime);
+    animId = requestAnimationFrame(tick);
+  }
+  animId = requestAnimationFrame(tick);
+}
+
+function formatTime(s) {
+  if (!s || isNaN(s)) return '0:00';
+  const m = Math.floor(s / 60);
+  const sec = Math.floor(s % 60);
+  return `${m}:${String(sec).padStart(2,'0')}`;
+}
+
+function updateTimeUI() {
+  document.getElementById('time-current').textContent = formatTime(currentTime);
+  document.getElementById('time-total').textContent = formatTime(duration);
+  const pct = duration ? (currentTime / duration) * 100 : 0;
+  document.getElementById('progress-fill').style.width = pct + '%';
+}
+
+function updatePlayBtn(playing) {
+  document.getElementById('play-icon').style.display = playing ? 'none' : 'block';
+  document.getElementById('pause-icon').style.display = playing ? 'block' : 'none';
+}
+
+// ============================================================
+//  SEARCH  (YouTube Data API via public proxy)
+// ============================================================
+async function searchYouTube(query) {
+  // Use YouTube oEmbed + search suggestion to find video
+  // We'll use a free YT search API
+  try {
+    const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(query)}&type=video&videoCategoryId=10&maxResults=12&key=AIzaSyD-PLACEHOLDER`;
+    // Fallback: use invidious public API
+    const invUrl = `https://invidious.jing.rocks/api/v1/search?q=${encodeURIComponent(query + ' music')}&type=video&page=1`;
+    const res = await fetch(invUrl);
+    if (!res.ok) throw new Error('API error');
+    const data = await res.json();
+    return data.slice(0, 12).map(v => ({
+      videoId: v.videoId,
+      title: v.title,
+      artist: v.author,
+      thumb: `https://i.ytimg.com/vi/${v.videoId}/mqdefault.jpg`,
+      duration: v.lengthSeconds
+    }));
+  } catch(e) {
+    // Fallback 2: piped
+    try {
+      const res2 = await fetch(`https://pipedapi.kavin.rocks/search?q=${encodeURIComponent(query + ' official music')}&filter=music_songs`);
+      const data2 = await res2.json();
+      return (data2.items || []).slice(0, 12).map(v => ({
+        videoId: v.url ? v.url.replace('/watch?v=', '') : '',
+        title: v.title,
+        artist: v.uploaderName || v.uploader || '',
+        thumb: v.thumbnail,
+        duration: v.duration
+      })).filter(v => v.videoId);
+    } catch(e2) {
+      throw new Error('Pencarian gagal. Coba lagi.');
+    }
+  }
+}
+
+// ============================================================
+//  LYRICS
+// ============================================================
+async function fetchLyrics(title, artist) {
+  const key = title + '|' + artist;
+  if (lyricsCache[key] !== undefined) return lyricsCache[key];
+  try {
+    const res = await fetch(`${CLOUDFLARE_WORKER}/?artist=${encodeURIComponent(artist)}&title=${encodeURIComponent(title)}`);
+    if (!res.ok) { lyricsCache[key] = []; return []; }
+    const results = await res.json();
+    if (!results || !results.length) { lyricsCache[key] = []; return []; }
+    const chosen = results.find(r => r.syncedLyrics) || results.find(r => r.plainLyrics) || results[0];
+    let parsed = [];
+    if (chosen.syncedLyrics) parsed = parseSynced(chosen.syncedLyrics);
+    else if (chosen.plainLyrics) parsed = parsePlain(chosen.plainLyrics);
+    lyricsCache[key] = parsed;
+    return parsed;
+  } catch(e) {
+    lyricsCache[key] = [];
+    return [];
+  }
+}
+
+function parseSynced(raw) {
+  return raw.split('\n').map(l => {
+    const m = l.match(/\[(\d+):(\d+\.?\d*)\](.*)/);
+    if (m) return { time: parseInt(m[1])*60 + parseFloat(m[2]), text: m[3].trim() };
+    return null;
+  }).filter(Boolean).filter(l => l.text);
+}
+
+function parsePlain(raw) {
+  let t = 0;
+  return raw.split('\n').filter(l => l.trim()).map(text => {
+    const entry = { time: t, text: text.trim() };
+    t += Math.min(5, Math.max(2, text.length / 12));
+    return entry;
+  });
+}
+
+function renderLyricsLine(ct) {
+  const container = document.getElementById('lyrics-container');
+  if (!container || lyrics.length === 0) return;
+  let idx = 0;
+  for (let i = 0; i < lyrics.length; i++) {
+    if (ct >= lyrics[i].time) idx = i; else break;
+  }
+  container.innerHTML = '';
+  lyrics.forEach((line, i) => {
+    const el = document.createElement('div');
+    const cls = i === idx ? 'active' : i < idx ? 'past' : 'upcoming';
+    el.className = 'lyrics-line ' + cls;
+    el.textContent = line.text;
+    el.addEventListener('click', () => {
+      if (ytPlayer) ytPlayer.seekTo(line.time, true);
+    });
+    container.appendChild(el);
+  });
+  const active = container.querySelectorAll('.lyrics-line')[idx];
+  if (active) {
+    const mid = container.offsetHeight / 2;
+    container.scrollTo({ top: active.offsetTop - mid + active.offsetHeight / 2, behavior: 'smooth' });
+  }
+}
+
+// ============================================================
+//  PLAY TRACK
+// ============================================================
+async function playTrack(track, fromPlaylist = false) {
+  currentTrack = track;
+  isPlaying = false;
+  lyrics = [];
+  currentTime = 0;
+
+  // Update now-playing UI
+  updateNowPlayingUI(track);
+
+  // Update player bar
+  document.getElementById('player-title').textContent = track.title;
+  document.getElementById('player-artist').textContent = track.artist;
+  updatePlayerThumb(track);
+
+  // Update lyrics panel placeholder
+  document.getElementById('lyrics-container').innerHTML = '<div class="lyrics-empty"><span>⏳</span>Memuat lirik...</div>';
+
+  // Mark playlist as playing
+  renderPlaylist();
+
+  // Load YT
+  if (ytPlayer && ytReady) {
+    ytPlayer.loadVideoById(track.videoId);
+    ytPlayer.playVideo();
+  }
+
+  // Fetch lyrics
+  const title = cleanTitle(track.title);
+  const artist = track.artist.replace(/VEVO|Official|Music/gi, '').trim();
+  const fetched = await fetchLyrics(title, artist);
+  lyrics = fetched;
+
+  if (lyrics.length === 0) {
+    document.getElementById('lyrics-container').innerHTML = '<div class="lyrics-empty"><span>😔</span>Lirik tidak tersedia untuk lagu ini</div>';
+  } else {
+    renderLyricsLine(0);
+  }
+
+  // Show now playing section
+  document.getElementById('now-playing-section').style.display = 'block';
+}
+
+function cleanTitle(title) {
+  return title
+    .replace(/\(Official.*?\)/gi, '')
+    .replace(/\[Official.*?\]/gi, '')
+    .replace(/Official Music Video/gi, '')
+    .replace(/Official Video/gi, '')
+    .replace(/Music Video/gi, '')
+    .replace(/Lyrics/gi, '')
+    .replace(/\(.*?ft\..*?\)/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function updateNowPlayingUI(track) {
+  document.getElementById('np-title').textContent = track.title;
+  document.getElementById('np-artist').textContent = track.artist;
+  const npThumb = document.getElementById('np-thumb');
+  const photo = track.photo;
+  if (photo || track.thumb) {
+    npThumb.outerHTML = `<img class="np-cover" id="np-thumb" src="${photo || track.thumb}" onerror="this.style.display='none'" alt="">`;
+  }
+}
+
+function updatePlayerThumb(track) {
+  const el = document.getElementById('player-thumb');
+  const photo = track.photo;
+  if (photo || track.thumb) {
+    el.outerHTML = `<img class="player-thumb" id="player-thumb" src="${photo || track.thumb}" onerror="this.style.display='none'" alt="">`;
+  }
+}
+
+// ============================================================
+//  PLAYLIST MANAGEMENT
+// ============================================================
+function savePlaylist() {
+  localStorage.setItem('melodify_playlist', JSON.stringify(playlist));
+}
+
+function addToPlaylist(track) {
+  const exists = playlist.find(t => t.videoId === track.videoId);
+  if (exists) { showToast('⚠️ Lagu sudah ada di playlist'); return; }
+  playlist.push({ ...track });
+  savePlaylist();
+  renderPlaylist();
+  showToast('✅ Ditambahkan ke playlist');
+}
+
+function removeFromPlaylist(idx) {
+  playlist.splice(idx, 1);
+  savePlaylist();
+  renderPlaylist();
+  showToast('🗑️ Dihapus dari playlist');
+}
+
+function renderPlaylist() {
+  const container = document.getElementById('playlist-container');
+  if (playlist.length === 0) {
+    container.innerHTML = '<div class="empty-state" style="padding:30px 10px;"><span>🎵</span><p style="font-size:0.78rem;">Cari lagu dan tambahkan ke playlist</p></div>';
+    return;
+  }
+  container.innerHTML = '';
+  playlist.forEach((track, i) => {
+    const isActive = currentTrack && currentTrack.videoId === track.videoId;
+    const div = document.createElement('div');
+    div.className = 'playlist-item' + (isActive ? ' playing' : '');
+    div.innerHTML = `
+      ${track.photo ? `<img class="playlist-thumb" src="${track.photo}" onerror="this.style.display='none'" alt="">` :
+        track.thumb ? `<img class="playlist-thumb" src="${track.thumb}" onerror="this.style.display='none'" alt="">` :
+        `<div class="playlist-thumb-placeholder">🎵</div>`}
+      <div class="playlist-info">
+        <div class="playlist-title">${escHtml(track.title)}</div>
+        <div class="playlist-artist">${escHtml(track.artist)}</div>
+      </div>
+      <div class="playing-bars"><span></span><span></span><span></span></div>
+      <button class="add-photo-btn" title="Tambah foto" onclick="openPhotoModal(${i}, event)">🖼️</button>
+      <button class="remove-btn" title="Hapus" onclick="removeFromPlaylist(${i}, event)">✕</button>
+    `;
+    div.addEventListener('click', (e) => {
+      if (e.target.classList.contains('remove-btn') || e.target.classList.contains('add-photo-btn')) return;
+      playTrack(playlist[i], true);
+    });
+    container.appendChild(div);
+  });
+}
+
+function playNext() {
+  if (!currentTrack || playlist.length === 0) return;
+  const idx = playlist.findIndex(t => t.videoId === currentTrack.videoId);
+  const next = playlist[idx + 1] || playlist[0];
+  if (next) playTrack(next, true);
+}
+
+function playPrev() {
+  if (!currentTrack || playlist.length === 0) return;
+  const idx = playlist.findIndex(t => t.videoId === currentTrack.videoId);
+  const prev = playlist[idx - 1] || playlist[playlist.length - 1];
+  if (prev) playTrack(prev, true);
+}
+
+// ============================================================
+//  SEARCH UI
+// ============================================================
+async function doSearch() {
+  const q = document.getElementById('search-input').value.trim();
+  if (!q) return;
+
+  document.getElementById('welcome-state').style.display = 'none';
+  document.getElementById('results-section').style.display = 'block';
+  document.getElementById('results-label').textContent = `Hasil untuk "${q}"`;
+
+  // Show skeletons
+  const grid = document.getElementById('results-grid');
+  grid.innerHTML = Array(8).fill(0).map(() => `
+    <div class="sk-card">
+      <div class="skeleton sk-img"></div>
+      <div class="skeleton sk-line" style="margin-top:8px;"></div>
+      <div class="skeleton sk-line short"></div>
+    </div>
+  `).join('');
+
+  try {
+    const results = await searchYouTube(q);
+    grid.innerHTML = '';
+    results.forEach(track => {
+      const card = document.createElement('div');
+      card.className = 'result-card';
+      card.innerHTML = `
+        <img class="result-thumb" src="${track.thumb}" alt="" loading="lazy">
+        <div class="result-play-overlay">
+          <svg viewBox="0 0 24 24" fill="black"><path d="M8 5v14l11-7z"/></svg>
+        </div>
+        <div class="result-title">${escHtml(track.title)}</div>
+        <div class="result-artist">${escHtml(track.artist)}</div>
+        <button class="add-to-playlist-btn" title="Tambah ke playlist">+</button>
+      `;
+      card.querySelector('.result-play-overlay').addEventListener('click', () => playTrack(track));
+      card.querySelector('.result-title').addEventListener('click', () => playTrack(track));
+      card.querySelector('.result-thumb').addEventListener('click', () => playTrack(track));
+      card.querySelector('.add-to-playlist-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        addToPlaylist(track);
+      });
+      grid.appendChild(card);
+    });
+    if (results.length === 0) {
+      grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--text-muted);">Tidak ada hasil ditemukan</div>';
+    }
+  } catch(e) {
+    grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;padding:40px;color:var(--text-muted);">${e.message}</div>`;
+  }
+}
+
+// ============================================================
+//  PHOTO UPLOAD MODAL
+// ============================================================
+function openPhotoModal(trackIdx, e) {
+  if (e) e.stopPropagation();
+  photoTarget = trackIdx;
+  pendingPhotoDataUrl = null;
+  const track = playlist[trackIdx];
+  document.getElementById('photo-modal-sub').textContent = `Foto untuk: ${track.title}`;
+  document.getElementById('upload-zone').innerHTML = `<span>🖼️</span><p>Klik atau drag foto ke sini<br><small>JPG, PNG, WebP</small></p>`;
+  document.getElementById('photo-modal').style.display = 'flex';
+}
+
+function openPhotoModalCurrentTrack() {
+  if (!currentTrack) return;
+  const idx = playlist.findIndex(t => t.videoId === currentTrack.videoId);
+  if (idx === -1) { showToast('Tambahkan ke playlist dulu'); return; }
+  openPhotoModal(idx);
+}
+
+// ============================================================
+//  HELPERS
+// ============================================================
+function escHtml(s) {
+  if (!s) return '';
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function showToast(msg, dur = 2500) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), dur);
+}
+
+// ============================================================
+//  EVENT LISTENERS
+// ============================================================
+document.getElementById('search-btn').addEventListener('click', doSearch);
+document.getElementById('search-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') doSearch();
+});
+
+document.getElementById('btn-play').addEventListener('click', () => {
+  if (!ytPlayer || !currentTrack) return;
+  if (isPlaying) ytPlayer.pauseVideo();
+  else ytPlayer.playVideo();
+});
+
+document.getElementById('btn-next').addEventListener('click', playNext);
+document.getElementById('btn-prev').addEventListener('click', playPrev);
+
+document.getElementById('progress-track').addEventListener('click', (e) => {
+  if (!ytPlayer || !duration) return;
+  const rect = e.currentTarget.getBoundingClientRect();
+  const pct = (e.clientX - rect.left) / rect.width;
+  ytPlayer.seekTo(pct * duration, true);
+});
+
+document.getElementById('volume-slider').addEventListener('input', (e) => {
+  if (ytPlayer) ytPlayer.setVolume(parseInt(e.target.value));
+});
+
+document.getElementById('np-add-playlist').addEventListener('click', () => {
+  if (currentTrack) addToPlaylist(currentTrack);
+});
+
+document.getElementById('np-add-photo').addEventListener('click', openPhotoModalCurrentTrack);
+
+// Photo modal
+document.getElementById('photo-cancel').addEventListener('click', () => {
+  document.getElementById('photo-modal').style.display = 'none';
+});
+
+document.getElementById('photo-modal').addEventListener('click', (e) => {
+  if (e.target === document.getElementById('photo-modal')) {
+    document.getElementById('photo-modal').style.display = 'none';
+  }
+});
+
+document.getElementById('upload-zone').addEventListener('click', () => {
+  document.getElementById('photo-file-input').click();
+});
+
+document.getElementById('upload-zone').addEventListener('dragover', (e) => {
+  e.preventDefault();
+  document.getElementById('upload-zone').style.borderColor = 'var(--accent)';
+});
+
+document.getElementById('upload-zone').addEventListener('drop', (e) => {
+  e.preventDefault();
+  const file = e.dataTransfer.files[0];
+  if (file) handlePhotoFile(file);
+});
+
+document.getElementById('photo-file-input').addEventListener('change', (e) => {
+  if (e.target.files[0]) handlePhotoFile(e.target.files[0]);
+});
+
+function handlePhotoFile(file) {
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    pendingPhotoDataUrl = e.target.result;
+    document.getElementById('upload-zone').innerHTML = `
+      <img src="${pendingPhotoDataUrl}" style="width:100%;height:120px;object-fit:cover;border-radius:8px;">
+      <p style="margin-top:8px;font-size:0.75rem;color:var(--accent);">✅ Foto dipilih</p>
+    `;
+  };
+  reader.readAsDataURL(file);
+}
+
+document.getElementById('photo-save').addEventListener('click', () => {
+  if (photoTarget === null || pendingPhotoDataUrl === null) {
+    showToast('⚠️ Pilih foto terlebih dahulu');
+    return;
+  }
+  playlist[photoTarget].photo = pendingPhotoDataUrl;
+  savePlaylist();
+  renderPlaylist();
+
+  // Update current if same
+  if (currentTrack && currentTrack.videoId === playlist[photoTarget].videoId) {
+    currentTrack.photo = pendingPhotoDataUrl;
+    updateNowPlayingUI(currentTrack);
+    updatePlayerThumb(currentTrack);
+  }
+
+  document.getElementById('photo-modal').style.display = 'none';
+  showToast('📸 Foto berhasil disimpan');
+});
+
+// ============================================================
+//  INIT
+// ============================================================
+renderPlaylist();
+</script>
+</body>
+</html>
