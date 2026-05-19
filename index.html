@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Melodify — Premium Music Player</title>
+<title>ALVINVN — Premium Music Player</title>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root {
@@ -12,10 +12,10 @@
   --card: #141928;
   --hover: #1A2035;
   --border: rgba(255,255,255,0.07);
-  --green: #1DB954;
-  --green-dim: rgba(29,185,84,0.12);
-  --green-glow: 0 0 30px rgba(29,185,84,0.25);
-  --teal: #3DD6C8;
+  --green: #1D6BDB;
+  --green-dim: rgba(29,107,219,0.12);
+  --green-glow: 0 0 30px rgba(29,107,219,0.25);
+  --teal: #3D9DD6;
   --text: #EEF2FF;
   --sub: #7B8DB0;
   --muted: #3A4560;
@@ -38,15 +38,15 @@ body{
 body::after{
   content:'';position:fixed;inset:0;
   background:
-    radial-gradient(ellipse 500px 350px at 15% 85%,rgba(29,185,84,0.07) 0%,transparent 65%),
-    radial-gradient(ellipse 350px 500px at 85% 15%,rgba(61,214,200,0.04) 0%,transparent 65%);
+    radial-gradient(ellipse 500px 350px at 15% 85%,rgba(29,107,219,0.07) 0%,transparent 65%),
+    radial-gradient(ellipse 350px 500px at 85% 15%,rgba(61,157,214,0.04) 0%,transparent 65%);
   pointer-events:none;z-index:0;
 }
 
 /* SIDEBAR */
 #side{grid-area:side;background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;z-index:1}
 .logo{padding:22px 18px 14px;display:flex;align-items:center;gap:10px}
-.logo-mark{width:34px;height:34px;background:var(--green);border-radius:10px;display:flex;align-items:center;justify-content:center;box-shadow:0 0 18px rgba(29,185,84,0.5);flex-shrink:0}
+.logo-mark{width:34px;height:34px;background:var(--green);border-radius:10px;display:flex;align-items:center;justify-content:center;box-shadow:0 0 18px rgba(29,107,219,0.5);flex-shrink:0}
 .logo-mark svg{width:18px;height:18px;color:#000}
 .logo-name{font-size:1.35rem;font-weight:800;letter-spacing:-0.5px;background:linear-gradient(130deg,#fff 30%,#7B8DB0);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
 .nav{padding:4px 10px;display:flex;flex-direction:column;gap:2px}
@@ -92,7 +92,7 @@ body::after{
 /* Hero */
 #np-hero{display:none;margin-bottom:22px}
 .hero-card{background:linear-gradient(135deg,var(--card),var(--hover));border:1px solid var(--border);border-radius:18px;padding:20px;display:flex;gap:18px;align-items:center;position:relative;overflow:hidden}
-.hero-card::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse 260px 180px at 0% 100%,rgba(29,185,84,0.09),transparent 60%);pointer-events:none}
+.hero-card::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse 260px 180px at 0% 100%,rgba(29,107,219,0.09),transparent 60%);pointer-events:none}
 .hero-img{width:90px;height:90px;border-radius:11px;object-fit:cover;flex-shrink:0;box-shadow:0 6px 20px rgba(0,0,0,0.4);background:var(--hover)}
 .hero-ph{width:90px;height:90px;border-radius:11px;background:var(--hover);flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:2.2rem}
 .hero-info{flex:1;min-width:0}
@@ -113,10 +113,10 @@ body::after{
 .r-img{width:100%;aspect-ratio:1;border-radius:8px;object-fit:cover;margin-bottom:8px;background:var(--hover);display:block}
 .r-play-ov{position:absolute;top:12px;left:12px;width:calc(100% - 24px);aspect-ratio:1;border-radius:8px;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .2s}
 .r-card:hover .r-play-ov{opacity:1}
-.r-play-ov svg{width:36px;height:36px;background:var(--green);border-radius:50%;padding:9px;color:#000;box-shadow:0 3px 16px rgba(29,185,84,.5)}
+.r-play-ov svg{width:36px;height:36px;background:var(--green);border-radius:50%;padding:9px;color:#000;box-shadow:0 3px 16px rgba(29,107,219,.5)}
 .r-name{font-size:.78rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:2px}
 .r-art{font-size:.7rem;color:var(--sub);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.r-add{position:absolute;bottom:10px;right:10px;width:26px;height:26px;background:var(--green);border:none;border-radius:50%;color:#000;font-size:1.1rem;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;opacity:0;transition:all .2s;box-shadow:0 3px 10px rgba(29,185,84,.4)}
+.r-add{position:absolute;bottom:10px;right:10px;width:26px;height:26px;background:var(--green);border:none;border-radius:50%;color:#000;font-size:1.1rem;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;opacity:0;transition:all .2s;box-shadow:0 3px 10px rgba(29,107,219,.4)}
 .r-card:hover .r-add{opacity:1}
 .r-add:hover{transform:scale(1.15)}
 .sk{background:linear-gradient(90deg,var(--card) 25%,var(--hover) 50%,var(--card) 75%);background-size:200% 100%;animation:sk 1.4s infinite;border-radius:8px}
@@ -142,7 +142,7 @@ body::after{
 .ll{font-size:.88rem;line-height:1.75;padding:4px 0;transition:all .35s;cursor:pointer;font-weight:400}
 .ll.past{color:var(--muted);font-size:.78rem}
 .ll.upcoming{color:var(--sub)}
-.ll.active{color:var(--text);font-size:1.05rem;font-weight:700;text-shadow:0 0 18px rgba(29,185,84,.28)}
+.ll.active{color:var(--text);font-size:1.05rem;font-weight:700;text-shadow:0 0 18px rgba(29,107,219,.28)}
 .lyr-empty{text-align:center;padding:50px 18px;color:var(--muted);font-size:.82rem;line-height:1.8}
 .lyr-empty i{display:block;font-size:2.2rem;margin-bottom:10px;font-style:normal}
 
@@ -309,7 +309,7 @@ body::after{
         <circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="10"/>
       </svg>
     </div>
-    <span class="logo-name">Melodify</span>
+    <span class="logo-name">ALVINVN</span>
   </div>
   <nav class="nav">
     <div class="nav-i on">
@@ -483,7 +483,7 @@ body::after{
 <script>
 'use strict';
 /*
-  MELODIFY v3 — cara kerja diadopsi dari chat-notes.js
+  ALVINVN v3 — cara kerja diadopsi dari chat-notes.js
   Search : iTunes Search API (CORS-free, no API key)
   Video  : YouTube IFrame API — promise-based initPlayer, destroy+recreate, fallback iframe
   Lyrics : Cloudflare Worker -> lrclib
@@ -644,7 +644,7 @@ async function doSearch(){
       const artist = it.artistName||'Unknown';
       const preview = it.previewUrl||null; // 30-second preview MP3
 
-      const track = { title, artist, thumb, preview, videoId:null, photo:null, _query:`${artist} ${title}` };
+      const track = { title, artist, thumb, preview, videoId:null, photo:null, _query:`${artist}|||${title}|||${it.trackId||Math.random()}` };
 
       const card = document.createElement('div');
       card.className='r-card';
@@ -806,9 +806,14 @@ function syncLyr(ct){
 function savePL(){ try{ localStorage.setItem('melo3_pl',JSON.stringify(playlist)); }catch(e){} }
 
 function addPL(track){
-  if(playlist.find(t=>t._query===track._query)){ toast('⚠️ Sudah ada di playlist'); return; }
+  // Cek duplikat berdasarkan judul + artis saja
+  const dup = playlist.find(t=>{
+    const ta = t._query.split('|||'); const na = track._query.split('|||');
+    return ta[0]===na[0] && ta[1]===na[1];
+  });
+  if(dup){ toast('⚠️ Sudah ada di playlist'); return; }
   playlist.push({...track});
-  savePL(); renderPL(); toast('✅ Ditambahkan ke playlist');
+  savePL(); renderPL(); toast('✅ '+track.title+' ditambahkan!');
 }
 
 function renderPL(){
@@ -816,7 +821,8 @@ function renderPL(){
   if(!playlist.length){ c.innerHTML='<div class="pl-empty"><span>🎵</span>Cari lagu &amp; tambahkan ke playlist</div>'; return; }
   c.innerHTML='';
   playlist.forEach((t,i)=>{
-    const active = curTrack && curTrack._query===t._query;
+    const tParts = t._query.split('|||'); const cParts = curTrack ? curTrack._query.split('|||') : [];
+    const active = curTrack && cParts[0]===tParts[0] && cParts[1]===tParts[1];
     const d=document.createElement('div');
     d.className='pl-item'+(active?' now':'');
     const src=t.photo||t.thumb;
@@ -840,15 +846,21 @@ function renderPL(){
   });
 }
 
+function _plIdx(){
+  if(!curTrack) return -1;
+  const cp = curTrack._query.split('|||');
+  return playlist.findIndex(t=>{ const tp=t._query.split('|||'); return tp[0]===cp[0]&&tp[1]===cp[1]; });
+}
 function playNext(){
-  if(!curTrack||!playlist.length) return;
-  const i=playlist.findIndex(t=>t._query===curTrack._query);
-  loadPlay(playlist[(i+1)%playlist.length]);
+  if(!playlist.length) return;
+  const i=_plIdx();
+  // Kalau curTrack tidak ada di playlist, mulai dari lagu pertama
+  loadPlay(playlist[i===-1?0:(i+1)%playlist.length]);
 }
 function playPrev(){
-  if(!curTrack||!playlist.length) return;
-  const i=playlist.findIndex(t=>t._query===curTrack._query);
-  loadPlay(playlist[(i-1+playlist.length)%playlist.length]);
+  if(!playlist.length) return;
+  const i=_plIdx();
+  loadPlay(playlist[i===-1?0:(i-1+playlist.length)%playlist.length]);
 }
 
 // ─── Thumbnail helpers ────────────────────────────────────
@@ -894,7 +906,8 @@ $('ph-save').addEventListener('click',()=>{
   if(photoIdx===null||!photoPending){ toast('⚠️ Pilih foto dulu'); return; }
   playlist[photoIdx].photo=photoPending;
   savePL(); renderPL();
-  if(curTrack&&curTrack._query===playlist[photoIdx]._query){
+  const _pp=playlist[photoIdx]._query.split('|||'); const _cp=curTrack?curTrack._query.split('|||'):[];
+  if(curTrack&&_cp[0]===_pp[0]&&_cp[1]===_pp[1]){
     curTrack.photo=photoPending;
     setHeroImg(curTrack); setBarImg(curTrack);
   }
@@ -920,7 +933,7 @@ $('vol').addEventListener('input',e=>{ if(YTP) YTP.setVolume(parseInt(e.target.v
 $('h-add-pl').addEventListener('click',()=>{ if(curTrack) addPL(curTrack); });
 $('h-add-photo').addEventListener('click',()=>{
   if(!curTrack)return;
-  const i=playlist.findIndex(t=>t._query===curTrack._query);
+  const i=_plIdx();
   if(i===-1){ toast('Tambahkan ke playlist dulu'); return; }
   openPhoto(i);
 });
@@ -935,8 +948,8 @@ function toast(msg,d=2700){
 
 // ─── Fullscreen Lyrics ───────────────────────────────────
 const FS_COLORS = [
-  '#1a5c3a','#1a3a6b','#6b1a3a','#3a1a6b',
-  '#6b3a1a','#1a5c6b','#4a6b1a','#6b1a5c',
+  '#0d2f6b','#0d1f4a','#1a2a6b','#0d3a5c',
+  '#0a1f52','#162b6b','#0d3052','#1a1a6b',
 ];
 let _trackColorIdx = 0;
 
