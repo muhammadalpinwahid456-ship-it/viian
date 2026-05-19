@@ -380,17 +380,27 @@ function loadYouTubeAPI() {
   });
 }
 
-// ─── Init/recreate player (promise-based, dari chat-notes) ─
-async function initPlayer(videoId) {
+// ─── Init/recreate player ────────────────────────────────
+// Mendukung dua mode:
+//   1. videoId  → langsung load video tertentu
+//   2. searchQuery → pakai listType=search (tidak perlu CORS/API key!)
+async function initPlayer(videoId, searchQuery) {
   await loadYouTubeAPI();
-  // Destroy player lama sebelum recreate
   if (YTP && YTP.destroy) { try { YTP.destroy(); } catch(e) {} }
   YTP = null;
 
   return new Promise((resolve) => {
+    const playerVars = { autoplay: 1, controls: 0, origin: location.origin };
+    if (!videoId && searchQuery) {
+      // listType=search: YouTube cari dan putar video pertama yang cocok
+      playerVars.listType = 'search';
+      playerVars.list     = searchQuery;
+    }
+
     YTP = new YT.Player('yt-player', {
-      height: '1', width: '1', videoId,
-      playerVars: { autoplay: 1, controls: 0, origin: location.origin },
+      height: '1', width: '1',
+      videoId: videoId || undefined,
+      playerVars,
       events: {
         onReady(e) {
           tot = e.target.getDuration();
@@ -406,15 +416,13 @@ async function initPlayer(videoId) {
         },
         onError(e) {
           console.error('YT error:', e.data);
-          fallbackPlayer(videoId);
-          toast('⚠️ Player error — mencoba fallback');
+          toast('⚠️ Video tidak bisa diputar — coba lagu lain');
           resolve();
         }
       }
     });
   });
 }
-
 // ─── Fallback iframe jika player gagal (dari chat-notes) ──
 function fallbackPlayer(videoId) {
   const wrap = $('yt-wrap');
@@ -503,67 +511,24 @@ async function doSearch(){
   }
 }
 
-// ─── Resolve YouTube videoId ──────────────────────────────
-// Strategi: Piped API (CORS-friendly, JSON) → allorigins scrape fallback
+// ─── Resolve YouTube videoId via YouTube IFrame search ───
+// Gunakan YT IFrame API dengan listType=search — tidak butuh
+// CORS proxy, tidak butuh API key. YouTube handle search-nya sendiri.
 async function resolveVid(query){
-  const q   = encodeURIComponent(query + ' official audio');
-  const qSh = encodeURIComponent(query + ' audio');
-
-  // 1. Piped instances — CORS-friendly JSON API, tanpa API key
-  const piped = [
-    'https://pipedapi.kavin.rocks',
-    'https://pipedapi.adminforge.de',
-    'https://pipedapi.tokhmi.xyz',
-    'https://api.piped.yt',
-  ];
-  for(const base of piped){
-    try{
-      const ctrl = new AbortController();
-      const timer = setTimeout(()=>ctrl.abort(), 6000);
-      const res = await fetch(`${base}/search?q=${q}&filter=music_songs`, { signal: ctrl.signal });
-      clearTimeout(timer);
-      if(!res.ok) continue;
-      const data = await res.json();
-      const items = data.items || [];
-      const first = items.find(i => i.url);
-      if(first){
-        const m = first.url.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
-        if(m) return m[1];
-      }
-    } catch(e){ continue; }
-  }
-
-  // 2. allorigins scrape — fallback ringan, encode sekali saja
-  try{
-    const ctrl = new AbortController();
-    const timer = setTimeout(()=>ctrl.abort(), 9000);
-    const ytUrl = 'https://www.youtube.com/results?search_query=' + qSh;
-    const res = await fetch(
-      'https://api.allorigins.win/get?url=' + encodeURIComponent(ytUrl),
-      { signal: ctrl.signal }
-    );
-    clearTimeout(timer);
-    if(res.ok){
-      const j = await res.json();
-      const m = (j.contents||'').match(/"videoId":"([a-zA-Z0-9_\-]{11})"/);
-      if(m) return m[1];
-    }
-  } catch(e){}
-
-  return null;
+  // Coba dapatkan videoId dari iframe search dulu via Cloudflare Worker (CORS-safe)
+  // Jika worker tidak support, return null → initPlayer akan pakai listType=search
+  return null; // Langsung pakai searchQuery di initPlayer
 }
 
-// ─── Load & Play (promise-based, dari chat-notes) ─────────
+// ─── Load & Play ─────────────────────────────────────────
 async function loadPlay(track) {
-  // Stop & cancel sebelumnya
   cancelAnimationFrame(raf);
   playing = false; cur = 0; tot = 0;
-
   curTrack = track;
   lyrs = [];
 
   // Instant UI update
-  $('h-title').textContent = '⏳ Mencari video...';
+  $('h-title').textContent = track.title;
   $('h-artist').textContent = track.artist;
   $('np-hero').style.display = 'block';
   setHeroImg(track); setBarImg(track);
@@ -573,19 +538,16 @@ async function loadPlay(track) {
   setPB(false); updProg();
   renderPL();
 
-  // Resolve YouTube videoId jika belum ada
-  if (!track.videoId) {
-    track.videoId = await resolveVid(track._query);
-  }
+  // Query untuk YouTube search (judul + artis, bersih)
+  const searchQ = track._query + ' official audio';
 
-  $('h-title').textContent = track.title;
-
-  // Jalankan initPlayer & fetchLyrics paralel (seperti chat-notes)
+  // Jalankan initPlayer (via listType=search) & fetchLyrics paralel
   const cl = cleanT(track.title);
   const [, lines] = await Promise.all([
-    track.videoId
-      ? initPlayer(track.videoId).catch(e => { console.error(e); if(track.videoId) fallbackPlayer(track.videoId); })
-      : Promise.resolve().then(() => toast('⚠️ Video tidak ditemukan di YouTube')),
+    initPlayer(null, searchQ).catch(e => {
+      console.error('initPlayer error:', e);
+      toast('⚠️ Gagal memuat video');
+    }),
     fetchLyr(cl, track.artist)
   ]);
 
@@ -595,7 +557,6 @@ async function loadPlay(track) {
     : '<div class="lyr-empty"><i>😔</i>Lirik tidak tersedia</div>';
   if (lyrs.length) syncLyr(0);
 }
-
 function cleanT(t){
   return t
     .replace(/\(official.*?\)/gi,'').replace(/\[official.*?\]/gi,'')
